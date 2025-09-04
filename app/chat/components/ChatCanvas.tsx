@@ -167,30 +167,45 @@ export default function ChatCanvas({
   );
 
   const addChildNode = useCallback(
-    (parentId: string, x: number, y: number) => {
+    (parentId: string, x: number, y: number, aiResponse?: ChatNode) => {
       if (!conversation) return;
 
-      const newNode: ChatNode = {
-        id: `node-${Date.now()}`,
-        content: "",
-        isUser: true,
-        x,
-        y,
-        parentId,
-        childIds: [],
-        isEditing: true,
-      };
+      if (aiResponse) {
+        // Add the provided AI response node
+        const updatedNodes = conversation.nodes.map((node) =>
+          node.id === parentId
+            ? { ...node, childIds: [...node.childIds, aiResponse.id] }
+            : node,
+        );
 
-      const updatedNodes = conversation.nodes.map((node) =>
-        node.id === parentId
-          ? { ...node, childIds: [...node.childIds, newNode.id] }
-          : node,
-      );
+        onUpdateConversation({
+          ...conversation,
+          nodes: [...updatedNodes, aiResponse],
+        });
+      } else {
+        // Create a new user input node
+        const newNode: ChatNode = {
+          id: `node-${Date.now()}`,
+          content: "",
+          isUser: true,
+          x,
+          y,
+          parentId,
+          childIds: [],
+          isEditing: true,
+        };
 
-      onUpdateConversation({
-        ...conversation,
-        nodes: [...updatedNodes, newNode],
-      });
+        const updatedNodes = conversation.nodes.map((node) =>
+          node.id === parentId
+            ? { ...node, childIds: [...node.childIds, newNode.id] }
+            : node,
+        );
+
+        onUpdateConversation({
+          ...conversation,
+          nodes: [...updatedNodes, newNode],
+        });
+      }
     },
     [conversation, onUpdateConversation],
   );

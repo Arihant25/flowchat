@@ -1,8 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
+import { streamChatCompletion } from "@/lib/ai-providers";
+import { getAllProviderConfigs } from "@/lib/storage";
+import { ChatRequest, ChatMessage } from "@/lib/types";
 
 export async function POST(req: NextRequest) {
   try {
-    const { message, conversationHistory = [] } = await req.json();
+    const body: ChatRequest = await req.json();
+    const {
+      message,
+      conversationHistory = [],
+      provider,
+      model,
+      providerId,
+      temperature = 0.7,
+      systemPrompt
+    } = body;
 
     if (!message || typeof message !== "string") {
       return NextResponse.json(
@@ -11,39 +23,109 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // For now, return a simple echo response
-    // TODO: Integrate with actual LLM providers (OpenAI, Anthropic, etc.)
-    const response = {
-      message: `Echo: ${message}`,
-      timestamp: new Date().toISOString(),
-    };
+    if (!provider || !model || !providerId) {
+      return NextResponse.json(
+        { error: "Provider, model, and providerId are required" },
+        { status: 400 }
+      );
+    }
 
-    return NextResponse.json(response);
-  } catch (error) {
+    // Get provider configuration
+    const configs = await getAllProviderConfigs();
+    const config = configs.find(c => c.id === providerId);
+
+    if (!config) {
+      return NextResponse.json(
+        { error: "Provider configuration not found" },
+        { status: 404 }
+      );
+    }
+
+    // Build message history
+    const messages: ChatMessage[] = [];
+
+    // Add system prompt if provided
+    if (systemPrompt?.trim()) {
+      messages.push({
+        role: "system",
+        content: systemPrompt,
+      });
+    }
+
+    // Add conversation history
+    messages.push(...conversationHistory);
+
+    // Add current message
+    messages.push({
+      role: "user",
+      content: message,
+    });
+
+    // Create streaming response
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        try {
+          for await (const chunk of streamChatCompletion(messages, model, config, temperature)) {
+            const data = `data: ${JSON.stringify(chunk)}\n\n`;
+            controller.enqueue(encoder.encode(data));
+          }
+
+          // Send completion signal
+          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+          controller.close();
+        } catch (error: any) {
+          console.error("Streaming error:", error);
+          const errorChunk = {
+            content: "",
+            isThinking: false,
+            isComplete: true,
+            error: error.message || "An unexpected error occurred",
+          };
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(errorChunk)}\n\n`));
+          controller.close();
+        }
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+      },
+    });
+
+  } catch (error: any) {
     console.error("Error in chat API:", error);
     return NextResponse.json(
-      { error: "Internal server error" },
+      { error: error.message || "Internal server error" },
       { status: 500 }
     );
   }
 }
 
-// Placeholder for future LLM integrations
-async function callLLM(message: string, history: any[], provider = "openai") {
-  switch (provider) {
-    case "openai":
-      // TODO: Implement OpenAI integration
-      break;
-    case "anthropic":
-      // TODO: Implement Anthropic integration
-      break;
-    case "google":
-      // TODO: Implement Google integration
-      break;
-    case "ollama":
-      // TODO: Implement Ollama integration
-      break;
-    default:
-      throw new Error(`Unsupported provider: ${provider}`);
+// API endpoint to get available providers and their models
+export async function GET() {
+  try {
+    const configs = await getAllProviderConfigs();
+
+    return NextResponse.json({
+      providers: configs.map(config => ({
+        id: config.id,
+        name: config.name,
+        provider: config.provider,
+        isDefault: config.isDefault,
+        defaultModel: config.defaultModel,
+        hasApiKey: !!config.apiKey,
+        baseUrl: config.baseUrl,
+      })),
+    });
+  } catch (error: any) {
+    console.error("Error getting providers:", error);
+    return NextResponse.json(
+      { error: "Failed to get providers" },
+      { status: 500 }
+    );
   }
 }

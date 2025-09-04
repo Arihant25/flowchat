@@ -6,6 +6,7 @@ import {
   putConversation,
   deleteConversation as deleteStoredConversation,
   StoredConversation,
+  initializeDefaultProviders,
 } from "@/lib/storage";
 import ChatSidebar from "./components/ChatSidebar";
 import ChatCanvas from "./components/ChatCanvas";
@@ -21,6 +22,8 @@ export interface ChatNode {
   parentId?: string;
   childIds: string[];
   isEditing?: boolean;
+  thinking?: string;
+  thinkingTime?: number;
 }
 
 export interface ChatConversation {
@@ -158,6 +161,9 @@ export default function ChatPage() {
     let mounted = true;
     (async () => {
       try {
+        // Initialize default providers first
+        await initializeDefaultProviders();
+
         const stored = await getAllConversations();
         if (!mounted) return;
         // convert back to ChatConversation shape

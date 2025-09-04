@@ -6,12 +6,16 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Plus, X, GitBranch, Send } from "lucide-react";
+import ProviderModelSelector from "@/components/ui/provider-model-selector";
+import ThinkingIndicator from "@/components/ui/thinking-indicator";
+import { getUserPreferences } from "@/lib/storage";
+import { ChatMessage, StreamingResponse } from "@/lib/types";
 
 interface ChatNodeComponentProps {
   node: ChatNode;
   onUpdateNode: (nodeId: string, updates: Partial<ChatNode>) => void;
   onDeleteNode: (nodeId: string) => void;
-  onAddChild: (parentId: string, x: number, y: number) => void;
+  onAddChild: (parentId: string, x: number, y: number, aiResponse?: ChatNode) => void;
   onBranch: (nodeId: string) => void;
   onTextSelection: (nodeId: string, text: string, x: number, y: number) => void;
   zoom: number;
@@ -30,6 +34,9 @@ export default function ChatNodeComponent({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [dontAskAgain, setDontAskAgain] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [selectedProviderId, setSelectedProviderId] = useState("");
+  const [selectedModel, setSelectedModel] = useState("");
+  const [streamingResponse, setStreamingResponse] = useState<StreamingResponse | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
 
@@ -39,44 +46,136 @@ export default function ChatNodeComponent({
     }
   }, [node.isEditing]);
 
+  useEffect(() => {
+    // Load user preferences for default provider/model
+    const loadDefaults = async () => {
+      const preferences = getUserPreferences();
+      if (preferences.defaultProvider && !selectedProviderId) {
+        setSelectedProviderId(preferences.defaultProvider);
+      }
+    };
+    loadDefaults();
+  }, [selectedProviderId]);
+
+  const buildConversationHistory = (): ChatMessage[] => {
+    // This would need to be implemented to build the actual conversation history
+    // For now, we'll return an empty array
+    // TODO: Build proper conversation history from the node tree
+    return [];
+  };
+
   const handleSubmit = async () => {
-    if (!node.content.trim()) return;
+    if (!node.content.trim() || !selectedProviderId || !selectedModel) return;
 
     setIsLoading(true);
+    setStreamingResponse(null);
     onUpdateNode(node.id, { isEditing: false });
 
     try {
+      const preferences = getUserPreferences();
+      const requestBody = {
+        message: node.content,
+        conversationHistory: buildConversationHistory(),
+        provider: selectedProviderId.split('_')[0], // Extract provider type from ID
+        model: selectedModel,
+        providerId: selectedProviderId,
+        temperature: preferences.temperature || 0.7,
+        systemPrompt: preferences.systemPrompt || "",
+      };
+
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: node.content,
-          conversationHistory: [], // TODO: Build proper conversation history
-        }),
+        body: JSON.stringify(requestBody),
       });
 
-      if (response.ok) {
-        const data = await response.json();
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
 
-        const aiResponse: ChatNode = {
-          id: `node-${Date.now()}-ai`,
-          content: data.message || "Sorry, I couldn't generate a response.",
-          isUser: false,
-          x: node.x,
-          y: node.y + 150,
-          parentId: node.id,
-          childIds: [],
-        };
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error("Failed to get response reader");
+      }
 
-        onUpdateNode(node.id, { childIds: [aiResponse.id] });
+      let aiContent = "";
+      let thinking = "";
+      let thinkingTime = 0;
 
-        // This would need to be handled by the parent component
-        // For now, we'll just update the current node to indicate completion
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = new TextDecoder().decode(value);
+          const lines = chunk.split("\n").filter(line => line.trim());
+
+          for (const line of lines) {
+            if (line.startsWith("data: ")) {
+              const data = line.slice(6);
+              if (data === "[DONE]") continue;
+
+              try {
+                const parsed: StreamingResponse = JSON.parse(data);
+                setStreamingResponse(parsed);
+
+                if (parsed.content) {
+                  aiContent = parsed.content;
+                }
+                if (parsed.thinking) {
+                  thinking = parsed.thinking;
+                }
+                if (parsed.thinkingTime) {
+                  thinkingTime = parsed.thinkingTime;
+                }
+
+                if (parsed.isComplete) {
+                  // Create AI response node
+                  const aiResponse: ChatNode = {
+                    id: `node-${Date.now()}-ai`,
+                    content: aiContent,
+                    thinking: thinking || undefined,
+                    thinkingTime: thinkingTime || undefined,
+                    isUser: false,
+                    x: node.x,
+                    y: node.y + 200,
+                    parentId: node.id,
+                    childIds: [],
+                  };
+
+                  // Add the AI response as a child
+                  onAddChild(node.id, node.x, node.y + 200, aiResponse);
+                  setStreamingResponse(null);
+                  break;
+                }
+              } catch (e) {
+                // Ignore JSON parse errors for partial chunks
+              }
+            }
+          }
+        }
+      } finally {
+        reader.releaseLock();
       }
     } catch (error) {
       console.error("Failed to get AI response:", error);
+      const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+
+      // Create error response node
+      const errorResponse: ChatNode = {
+        id: `node-${Date.now()}-error`,
+        content: `Error: ${errorMessage}`,
+        isUser: false,
+        x: node.x,
+        y: node.y + 200,
+        parentId: node.id,
+        childIds: [],
+      };
+
+      onAddChild(node.id, node.x, node.y + 200, errorResponse);
     } finally {
       setIsLoading(false);
+      setStreamingResponse(null);
     }
   };
 
@@ -153,6 +252,22 @@ export default function ChatNodeComponent({
             {node.isUser ? "You" : "AI"}
           </div>
 
+          {!node.isUser && node.thinking && (
+            <ThinkingIndicator
+              thinking={node.thinking}
+              thinkingTime={node.thinkingTime}
+              isThinking={false}
+            />
+          )}
+
+          {streamingResponse && (
+            <ThinkingIndicator
+              thinking={streamingResponse.thinking}
+              thinkingTime={streamingResponse.thinkingTime}
+              isThinking={streamingResponse.isThinking}
+            />
+          )}
+
           {node.isEditing ? (
             <div className="space-y-2">
               <Textarea
@@ -167,11 +282,21 @@ export default function ChatNodeComponent({
                   }
                 }}
               />
+
+              {/* Provider and Model Selection */}
+              <ProviderModelSelector
+                selectedProviderId={selectedProviderId}
+                selectedModel={selectedModel}
+                onProviderChange={setSelectedProviderId}
+                onModelChange={setSelectedModel}
+                className="mb-2"
+              />
+
               <div className="flex justify-end gap-2">
                 <Button
                   size="sm"
                   onClick={handleSubmit}
-                  disabled={!node.content.trim() || isLoading}
+                  disabled={!node.content.trim() || !selectedProviderId || !selectedModel || isLoading}
                 >
                   <Send className="w-3 h-3 mr-1" />
                   {isLoading ? "Sending..." : "Send"}
@@ -179,13 +304,29 @@ export default function ChatNodeComponent({
               </div>
             </div>
           ) : (
-            <div
-              ref={contentRef}
-              className="whitespace-pre-wrap select-text cursor-text"
-              onMouseUp={handleTextSelect}
-            >
-              {node.content}
-            </div>
+            <>
+              {streamingResponse && !streamingResponse.isComplete && (
+                <div className="mb-2">
+                  <div className="text-sm text-muted-foreground mb-1">
+                    {streamingResponse.isThinking ? "Thinking..." : "Responding..."}
+                  </div>
+                  <div className="whitespace-pre-wrap">
+                    {streamingResponse.content}
+                    {!streamingResponse.isThinking && (
+                      <span className="inline-block w-2 h-4 bg-primary ml-1 animate-pulse" />
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <div
+                ref={contentRef}
+                className="whitespace-pre-wrap select-text cursor-text"
+                onMouseUp={handleTextSelect}
+              >
+                {node.content}
+              </div>
+            </>
           )}
 
           {isHovered && !node.isEditing && (
