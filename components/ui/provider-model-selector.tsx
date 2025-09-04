@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef, memo } from "react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { RefreshCw, Settings } from "lucide-react";
@@ -23,7 +23,7 @@ interface ProviderModelSelectorProps {
     className?: string;
 }
 
-export default function ProviderModelSelector({
+export default memo(function ProviderModelSelector({
     selectedProviderId,
     selectedModel,
     onProviderChange,
@@ -32,31 +32,26 @@ export default function ProviderModelSelector({
 }: ProviderModelSelectorProps) {
     const [providers, setProviders] = useState<APIProviderConfig[]>([]);
     const [models, setModels] = useState<ModelInfo[]>([]);
-    const [loadingProviders, setLoadingProviders] = useState(true);
+    const [loadingProviders, setLoadingProviders] = useState(false);
     const [loadingModels, setLoadingModels] = useState(false);
+    const [hasLoadedProviders, setHasLoadedProviders] = useState(false);
+    const [hasInitialized, setHasInitialized] = useState(false);
+    const loadingModelsRef = useRef(false);
+    const mounted = useRef(true);
 
-    // Load providers on component mount
-    useEffect(() => {
-        loadProviders();
-    }, []);
-
-    // Load models when provider changes
-    useEffect(() => {
-        if (selectedProviderId) {
-            loadModelsForProvider(selectedProviderId);
-        } else {
-            // Clear models when no provider is selected
-            setModels([]);
-        }
-    }, [selectedProviderId]);
-
+    // Simple function to load providers - not memoized to avoid dependency issues
     const loadProviders = async () => {
+        if (hasLoadedProviders || loadingProviders) return;
+
         try {
             setLoadingProviders(true);
             const response = await fetch("/api/chat");
+            if (!mounted.current) return;
+
             if (response.ok) {
                 const data = await response.json();
                 setProviders(data.providers || []);
+                setHasLoadedProviders(true);
 
                 // If no provider is selected, select the first default one
                 if (!selectedProviderId && data.providers?.length > 0) {
@@ -67,26 +62,37 @@ export default function ProviderModelSelector({
         } catch (error) {
             console.error("Failed to load providers:", error);
         } finally {
-            setLoadingProviders(false);
+            if (mounted.current) {
+                setLoadingProviders(false);
+            }
         }
     };
 
+    // Simple function to load models - not memoized to avoid dependency issues
     const loadModelsForProvider = async (providerId: string, refresh = false) => {
+        if (loadingModelsRef.current && !refresh) return;
+
         try {
+            loadingModelsRef.current = true;
             setLoadingModels(true);
-            // Clear current model selection when switching providers
+
+            // Only clear models and selection when switching providers, not on refresh
             if (!refresh) {
-                onModelChange("");
                 setModels([]);
+                if (selectedModel) {
+                    onModelChange("");
+                }
             }
 
             const response = await fetch(`/api/models?providerId=${providerId}&refresh=${refresh}`);
+            if (!mounted.current) return;
+
             if (response.ok) {
                 const data = await response.json();
                 setModels(data.models || []);
 
-                // If no model is selected, select the default one for this provider
-                if (!selectedModel && data.models?.length > 0) {
+                // Auto-select default model only if no model is currently selected
+                if (!selectedModel && data.models?.length > 0 && !refresh) {
                     const provider = providers.find(p => p.id === providerId);
                     const defaultModel = provider?.defaultModel || data.models[0]?.id;
                     if (defaultModel) {
@@ -97,15 +103,38 @@ export default function ProviderModelSelector({
         } catch (error) {
             console.error("Failed to load models:", error);
         } finally {
-            setLoadingModels(false);
+            if (mounted.current) {
+                setLoadingModels(false);
+                loadingModelsRef.current = false;
+            }
         }
     };
 
-    const refreshModels = () => {
+    // Load providers on component mount
+    useEffect(() => {
+        mounted.current = true;
+        if (!hasInitialized) {
+            setHasInitialized(true);
+            loadProviders();
+        }
+        return () => {
+            mounted.current = false;
+        };
+    }, []);
+
+    // Load models when provider changes and providers are loaded
+    useEffect(() => {
+        if (selectedProviderId && hasLoadedProviders && providers.length > 0) {
+            loadModelsForProvider(selectedProviderId);
+        }
+    }, [selectedProviderId, hasLoadedProviders, providers.length]);
+
+    // Memoize the refresh function to prevent unnecessary re-renders
+    const refreshModels = useCallback(() => {
         if (selectedProviderId) {
             loadModelsForProvider(selectedProviderId, true);
         }
-    };
+    }, [selectedProviderId]);
 
     const selectedProvider = providers.find(p => p.id === selectedProviderId);
 
@@ -184,4 +213,4 @@ export default function ProviderModelSelector({
             </Button>
         </div>
     );
-}
+});

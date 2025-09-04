@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, memo } from "react";
 import { ChatNode } from "../page";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -18,16 +18,20 @@ interface ChatNodeComponentProps {
   onAddChild: (parentId: string, x: number, y: number, aiResponse?: ChatNode) => void;
   onBranch: (nodeId: string) => void;
   onTextSelection: (nodeId: string, text: string, x: number, y: number) => void;
+  onMoveNode: (nodeId: string, x: number, y: number) => void;
+  onNodeClick?: (nodeId: string, event: React.MouseEvent) => void;
   zoom: number;
 }
 
-export default function ChatNodeComponent({
+export default memo(function ChatNodeComponent({
   node,
   onUpdateNode,
   onDeleteNode,
   onAddChild,
   onBranch,
   onTextSelection,
+  onMoveNode,
+  onNodeClick,
   zoom,
 }: ChatNodeComponentProps) {
   const [isHovered, setIsHovered] = useState(false);
@@ -382,4 +386,4 @@ export default function ChatNodeComponent({
       )}
     </>
   );
-}
+});

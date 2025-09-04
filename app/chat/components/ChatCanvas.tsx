@@ -1,6 +1,9 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
+import { DndProvider } from "react-dnd";
+import { HTML5Backend } from "react-dnd-html5-backend";
+import { useDrop } from "react-dnd";
 import { ChatConversation, ChatNode } from "../page";
 import ChatNodeComponent from "./ChatNode";
 
@@ -29,6 +32,16 @@ export default function ChatCanvas({
     x: number;
     y: number;
   } | null>(null);
+
+  // Use ref to avoid recreating callbacks when conversation changes
+  const conversationRef = useRef<ChatConversation | null>(conversation);
+  const onUpdateConversationRef = useRef(onUpdateConversation);
+
+  // Keep refs in sync
+  useEffect(() => {
+    conversationRef.current = conversation;
+    onUpdateConversationRef.current = onUpdateConversation;
+  }, [conversation, onUpdateConversation]);
 
   const handleCanvasClick = useCallback(
     (e: React.MouseEvent) => {
@@ -102,32 +115,34 @@ export default function ChatCanvas({
 
   const updateNode = useCallback(
     (nodeId: string, updates: Partial<ChatNode>) => {
-      if (!conversation) return;
+      const currentConversation = conversationRef.current;
+      if (!currentConversation) return;
 
-      const updatedNodes = conversation.nodes.map((node) =>
+      const updatedNodes = currentConversation.nodes.map((node) =>
         node.id === nodeId ? { ...node, ...updates } : node,
       );
 
-      onUpdateConversation({
-        ...conversation,
+      onUpdateConversationRef.current({
+        ...currentConversation,
         nodes: updatedNodes,
       });
     },
-    [conversation, onUpdateConversation],
+    [], // No dependencies - uses refs
   );
 
   const deleteNode = useCallback(
     (nodeId: string) => {
-      if (!conversation) return;
+      const currentConversation = conversationRef.current;
+      if (!currentConversation) return;
 
-      const nodeToDelete = conversation.nodes.find((n) => n.id === nodeId);
+      const nodeToDelete = currentConversation.nodes.find((n) => n.id === nodeId);
       if (!nodeToDelete) return;
 
       const nodesToDelete = new Set<string>();
 
       const collectChildNodes = (id: string) => {
         nodesToDelete.add(id);
-        const node = conversation.nodes.find((n) => n.id === id);
+        const node = currentConversation.nodes.find((n) => n.id === id);
         if (node) {
           node.childIds.forEach((childId) => collectChildNodes(childId));
         }
@@ -135,7 +150,7 @@ export default function ChatCanvas({
 
       collectChildNodes(nodeId);
 
-      const updatedNodes = conversation.nodes
+      const updatedNodes = currentConversation.nodes
         .filter((node) => !nodesToDelete.has(node.id))
         .map((node) => ({
           ...node,
@@ -158,28 +173,29 @@ export default function ChatCanvas({
         }
       }
 
-      onUpdateConversation({
-        ...conversation,
+      onUpdateConversationRef.current({
+        ...currentConversation,
         nodes: updatedNodes,
       });
     },
-    [conversation, onUpdateConversation],
+    [], // No dependencies - uses refs
   );
 
   const addChildNode = useCallback(
     (parentId: string, x: number, y: number, aiResponse?: ChatNode) => {
-      if (!conversation) return;
+      const currentConversation = conversationRef.current;
+      if (!currentConversation) return;
 
       if (aiResponse) {
         // Add the provided AI response node
-        const updatedNodes = conversation.nodes.map((node) =>
+        const updatedNodes = currentConversation.nodes.map((node) =>
           node.id === parentId
             ? { ...node, childIds: [...node.childIds, aiResponse.id] }
             : node,
         );
 
-        onUpdateConversation({
-          ...conversation,
+        onUpdateConversationRef.current({
+          ...currentConversation,
           nodes: [...updatedNodes, aiResponse],
         });
       } else {
@@ -195,36 +211,37 @@ export default function ChatCanvas({
           isEditing: true,
         };
 
-        const updatedNodes = conversation.nodes.map((node) =>
+        const updatedNodes = currentConversation.nodes.map((node) =>
           node.id === parentId
             ? { ...node, childIds: [...node.childIds, newNode.id] }
             : node,
         );
 
-        onUpdateConversation({
-          ...conversation,
+        onUpdateConversationRef.current({
+          ...currentConversation,
           nodes: [...updatedNodes, newNode],
         });
       }
     },
-    [conversation, onUpdateConversation],
+    [], // No dependencies - uses refs
   );
 
   const branchNode = useCallback(
     (nodeId: string) => {
-      if (!conversation) return;
+      const currentConversation = conversationRef.current;
+      if (!currentConversation) return;
 
-      const nodeIndex = conversation.nodes.findIndex((n) => n.id === nodeId);
+      const nodeIndex = currentConversation.nodes.findIndex((n) => n.id === nodeId);
       if (nodeIndex === -1) return;
 
-      const originalNode = conversation.nodes[nodeIndex];
+      const originalNode = currentConversation.nodes[nodeIndex];
       const conversationHistory: ChatNode[] = [];
 
       let currentNode: ChatNode | undefined = originalNode;
       while (currentNode) {
         conversationHistory.unshift(currentNode);
         currentNode = currentNode.parentId
-          ? conversation.nodes.find((n) => n.id === currentNode!.parentId)
+          ? currentConversation.nodes.find((n) => n.id === currentNode!.parentId)
           : undefined;
       }
 
@@ -251,12 +268,12 @@ export default function ChatCanvas({
         previousNewNode = newNode;
       });
 
-      onUpdateConversation({
-        ...conversation,
-        nodes: [...conversation.nodes, ...newNodes],
+      onUpdateConversationRef.current({
+        ...currentConversation,
+        nodes: [...currentConversation.nodes, ...newNodes],
       });
     },
-    [conversation, onUpdateConversation],
+    [], // No dependencies - uses refs
   );
 
   const handleTextSelection = useCallback(
@@ -264,6 +281,30 @@ export default function ChatCanvas({
       if (text.trim()) {
         setSelectedText({ text, nodeId, x, y });
       }
+    },
+    [],
+  );
+
+  const moveNode = useCallback(
+    (nodeId: string, x: number, y: number) => {
+      const currentConversation = conversationRef.current;
+      if (!currentConversation) return;
+
+      const updatedNodes = currentConversation.nodes.map((node) =>
+        node.id === nodeId ? { ...node, x, y } : node,
+      );
+
+      onUpdateConversationRef.current({
+        ...currentConversation,
+        nodes: updatedNodes,
+      });
+    },
+    [], // No dependencies - uses refs
+  );
+
+  const handleNodeClick = useCallback(
+    (nodeId: string, event: React.MouseEvent) => {
+      // Connection mode functionality removed
     },
     [],
   );
@@ -284,97 +325,149 @@ export default function ChatCanvas({
   const dotPattern = `radial-gradient(circle, rgba(156, 163, 175, 0.3) 1px, transparent 1px)`;
   const dotSize = 20 * zoom;
 
-  return (
-    <div
-      ref={canvasRef}
-      className="w-full h-full overflow-hidden cursor-grab active:cursor-grabbing relative"
-      style={{
-        backgroundImage: dotPattern,
-        backgroundSize: `${dotSize}px ${dotSize}px`,
-        backgroundPosition: `${pan.x % dotSize}px ${pan.y % dotSize}px`,
-      }}
-      onClick={handleCanvasClick}
-      onMouseDown={handleMouseDown}
-      onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUp}
-      onWheel={handleWheel}
-    >
+  // Canvas drop target component
+  function CanvasDropTarget({ children }: { children: React.ReactNode }) {
+    const [{ isOver }, drop] = useDrop({
+      accept: "node",
+      drop: (item: { id: string; x: number; y: number }, monitor) => {
+        return { dropped: true };
+      },
+      collect: (monitor) => ({
+        isOver: monitor.isOver(),
+      }),
+    });
+
+    const dropRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+      if (dropRef.current) {
+        drop(dropRef.current);
+      }
+    }, [drop]);
+
+    return (
       <div
+        ref={dropRef}
+        className={`w-full h-full overflow-hidden cursor-grab active:cursor-grabbing relative ${isOver ? "bg-blue-50/20" : ""
+          }`}
         style={{
-          transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-          transformOrigin: "0 0",
+          backgroundImage: dotPattern,
+          backgroundSize: `${dotSize}px ${dotSize}px`,
+          backgroundPosition: `${pan.x % dotSize}px ${pan.y % dotSize}px`,
         }}
-        className="absolute inset-0"
+        onClick={handleCanvasClick}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onWheel={handleWheel}
       >
-        {!conversation || conversation.nodes.length === 0 ? (
-          <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-muted-foreground text-xl pointer-events-none">
-            Click anywhere to start chatting!
-          </div>
-        ) : (
-          <>
-            {conversation.nodes.map((node) => (
-              <ChatNodeComponent
-                key={node.id}
-                node={node}
-                onUpdateNode={updateNode}
-                onDeleteNode={deleteNode}
-                onAddChild={addChildNode}
-                onBranch={branchNode}
-                onTextSelection={handleTextSelection}
-                zoom={zoom}
-              />
-            ))}
-
-            {conversation.nodes.map((node) =>
-              node.childIds.map((childId) => {
-                const childNode = conversation.nodes.find(
-                  (n) => n.id === childId,
-                );
-                if (!childNode) return null;
-
-                return (
-                  <svg
-                    key={`edge-${node.id}-${childId}`}
-                    className="absolute pointer-events-none"
-                    style={{
-                      left: Math.min(node.x, childNode.x) - 10,
-                      top: Math.min(node.y, childNode.y) - 10,
-                      width: Math.abs(childNode.x - node.x) + 20,
-                      height: Math.abs(childNode.y - node.y) + 20,
-                    }}
-                  >
-                    <line
-                      x1={node.x - Math.min(node.x, childNode.x) + 10}
-                      y1={node.y - Math.min(node.y, childNode.y) + 10}
-                      x2={childNode.x - Math.min(node.x, childNode.x) + 10}
-                      y2={childNode.y - Math.min(node.y, childNode.y) + 10}
-                      stroke="rgba(156, 163, 175, 0.5)"
-                      strokeWidth="2"
-                    />
-                  </svg>
-                );
-              }),
-            )}
-          </>
-        )}
+        {children}
       </div>
+    );
+  }
 
-      {selectedText && (
+  return (
+    <DndProvider backend={HTML5Backend}>
+      <CanvasDropTarget>
         <div
-          className="absolute z-50"
+          ref={canvasRef}
           style={{
-            left: selectedText.x + pan.x,
-            top: selectedText.y + pan.y - 40,
+            transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+            transformOrigin: "0 0",
           }}
+          className="absolute inset-0"
         >
-          <button
-            onClick={handleReplyToSelection}
-            className="bg-primary text-primary-foreground px-3 py-1 rounded text-sm hover:bg-primary/90"
-          >
-            Reply to Selection
-          </button>
+          {!conversation || conversation.nodes.length === 0 ? (
+            <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-muted-foreground text-xl pointer-events-none">
+              Click anywhere to start chatting!
+            </div>
+          ) : (
+            <>
+              {conversation.nodes.map((node) => (
+                <ChatNodeComponent
+                  key={node.id}
+                  node={node}
+                  onUpdateNode={updateNode}
+                  onDeleteNode={deleteNode}
+                  onAddChild={addChildNode}
+                  onBranch={branchNode}
+                  onTextSelection={handleTextSelection}
+                  onMoveNode={moveNode}
+                  onNodeClick={handleNodeClick}
+                  zoom={zoom}
+                />
+              ))}
+
+              {conversation.nodes.map((node) =>
+                node.childIds.map((childId) => {
+                  const childNode = conversation.nodes.find(
+                    (n) => n.id === childId,
+                  );
+                  if (!childNode) return null;
+
+                  const isHighlighted = false;
+
+                  return (
+                    <svg
+                      key={`edge-${node.id}-${childId}`}
+                      className="absolute pointer-events-none"
+                      style={{
+                        left: Math.min(node.x, childNode.x) - 10,
+                        top: Math.min(node.y, childNode.y) - 10,
+                        width: Math.abs(childNode.x - node.x) + 20,
+                        height: Math.abs(childNode.y - node.y) + 20,
+                      }}
+                    >
+                      <defs>
+                        <marker
+                          id={`arrowhead-${node.id}-${childId}`}
+                          markerWidth="10"
+                          markerHeight="7"
+                          refX="9"
+                          refY="3.5"
+                          orient="auto"
+                        >
+                          <polygon
+                            points="0 0, 10 3.5, 0 7"
+                            fill={isHighlighted ? "rgba(59, 130, 246, 0.8)" : "rgba(156, 163, 175, 0.5)"}
+                          />
+                        </marker>
+                      </defs>
+                      <line
+                        x1={node.x - Math.min(node.x, childNode.x) + 10}
+                        y1={node.y - Math.min(node.y, childNode.y) + 10}
+                        x2={childNode.x - Math.min(node.x, childNode.x) + 10}
+                        y2={childNode.y - Math.min(node.y, childNode.y) + 10}
+                        stroke={isHighlighted ? "rgba(59, 130, 246, 0.8)" : "rgba(156, 163, 175, 0.5)"}
+                        strokeWidth={isHighlighted ? "3" : "2"}
+                        markerEnd={`url(#arrowhead-${node.id}-${childId})`}
+                        className="transition-all duration-200"
+                      />
+                    </svg>
+                  );
+                }),
+              )}
+            </>
+          )}
         </div>
-      )}
-    </div>
+
+        {selectedText && (
+          <div
+            className="absolute z-50"
+            style={{
+              left: selectedText.x + pan.x,
+              top: selectedText.y + pan.y - 40,
+            }}
+          >
+            <button
+              onClick={handleReplyToSelection}
+              className="bg-primary text-primary-foreground px-3 py-1 rounded text-sm hover:bg-primary/90"
+            >
+              Reply to Selection
+            </button>
+          </div>
+        )}
+      </CanvasDropTarget>
+    </DndProvider>
   );
 }
