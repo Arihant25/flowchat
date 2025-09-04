@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useRef, useEffect, memo } from "react";
+import { useState, useRef, useEffect } from "react";
+import { useDrag } from "react-dnd";
 import { ChatNode } from "../page";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -23,7 +24,7 @@ interface ChatNodeComponentProps {
   zoom: number;
 }
 
-export default memo(function ChatNodeComponent({
+export default function ChatNodeComponent({
   node,
   onUpdateNode,
   onDeleteNode,
@@ -34,6 +35,8 @@ export default memo(function ChatNodeComponent({
   onNodeClick,
   zoom,
 }: ChatNodeComponentProps) {
+  const [localContent, setLocalContent] = useState(node.content);
+  const [isLocalEditing, setIsLocalEditing] = useState(node.isEditing);
   const [isHovered, setIsHovered] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [dontAskAgain, setDontAskAgain] = useState(false);
@@ -43,12 +46,48 @@ export default memo(function ChatNodeComponent({
   const [streamingResponse, setStreamingResponse] = useState<StreamingResponse | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<HTMLDivElement>(null);
+
+  // Use refs to store initial values and prevent re-renders
+  const initialNodeRef = useRef(node);
+  const propsRef = useRef({ onUpdateNode, onDeleteNode, onAddChild, onBranch, onTextSelection, onMoveNode, onNodeClick });
+
+  // Update refs when props change but don't cause re-renders
+  propsRef.current = { onUpdateNode, onDeleteNode, onAddChild, onBranch, onTextSelection, onMoveNode, onNodeClick };
+
+  // Drag and drop functionality
+  const [{ isDragging }, drag, preview] = useDrag({
+    type: "node",
+    item: () => {
+      console.log('Drag started for node:', initialNodeRef.current.id);
+      return { 
+        id: initialNodeRef.current.id, 
+        x: initialNodeRef.current.x, 
+        y: initialNodeRef.current.y 
+      };
+    },
+    end: (item, monitor) => {
+      console.log('Drag ended:', { item, didDrop: monitor.didDrop() });
+    },
+    collect: (monitor) => ({
+      isDragging: monitor.isDragging(),
+    }),
+  });
+
+  // Combine drag ref with card ref
+  useEffect(() => {
+    if (dragRef.current) {
+      drag(dragRef.current);
+      // Use the actual node as the drag preview instead of an empty image
+      preview(dragRef.current);
+    }
+  }, [drag, preview]);
 
   useEffect(() => {
-    if (node.isEditing && textareaRef.current) {
+    if (isLocalEditing && textareaRef.current) {
       textareaRef.current.focus();
     }
-  }, [node.isEditing]);
+  }, [isLocalEditing]);
 
   useEffect(() => {
     // Load user preferences for default provider/model
@@ -69,16 +108,22 @@ export default memo(function ChatNodeComponent({
   };
 
   const handleSubmit = async () => {
-    if (!node.content.trim() || !selectedProviderId || !selectedModel) return;
+    if (!localContent.trim() || !selectedProviderId || !selectedModel) return;
 
     setIsLoading(true);
     setStreamingResponse(null);
-    onUpdateNode(node.id, { isEditing: false });
+    setIsLocalEditing(false);
+
+    // Update the parent state only once at the end
+    propsRef.current.onUpdateNode(initialNodeRef.current.id, {
+      content: localContent,
+      isEditing: false
+    });
 
     try {
       const preferences = getUserPreferences();
       const requestBody = {
-        message: node.content,
+        message: localContent,
         conversationHistory: buildConversationHistory(),
         provider: selectedProviderId.split('_')[0], // Extract provider type from ID
         model: selectedModel,
@@ -141,14 +186,14 @@ export default memo(function ChatNodeComponent({
                     thinking: thinking || undefined,
                     thinkingTime: thinkingTime || undefined,
                     isUser: false,
-                    x: node.x,
-                    y: node.y + 200,
-                    parentId: node.id,
+                    x: initialNodeRef.current.x,
+                    y: initialNodeRef.current.y + 200,
+                    parentId: initialNodeRef.current.id,
                     childIds: [],
                   };
 
                   // Add the AI response as a child
-                  onAddChild(node.id, node.x, node.y + 200, aiResponse);
+                  propsRef.current.onAddChild(initialNodeRef.current.id, initialNodeRef.current.x, initialNodeRef.current.y + 200, aiResponse);
                   setStreamingResponse(null);
                   break;
                 }
@@ -170,13 +215,13 @@ export default memo(function ChatNodeComponent({
         id: `node-${Date.now()}-error`,
         content: `Error: ${errorMessage}`,
         isUser: false,
-        x: node.x,
-        y: node.y + 200,
-        parentId: node.id,
+        x: initialNodeRef.current.x,
+        y: initialNodeRef.current.y + 200,
+        parentId: initialNodeRef.current.id,
         childIds: [],
       };
 
-      onAddChild(node.id, node.x, node.y + 200, errorResponse);
+      propsRef.current.onAddChild(initialNodeRef.current.id, initialNodeRef.current.x, initialNodeRef.current.y + 200, errorResponse);
     } finally {
       setIsLoading(false);
       setStreamingResponse(null);
@@ -187,7 +232,7 @@ export default memo(function ChatNodeComponent({
     const shouldSkipConfirm = localStorage.getItem("skipDeleteConfirm") === "true";
 
     if (shouldSkipConfirm) {
-      onDeleteNode(node.id);
+      propsRef.current.onDeleteNode(initialNodeRef.current.id);
     } else {
       setShowDeleteConfirm(true);
     }
@@ -197,12 +242,12 @@ export default memo(function ChatNodeComponent({
     if (dontAskAgain) {
       localStorage.setItem("skipDeleteConfirm", "true");
     }
-    onDeleteNode(node.id);
+    propsRef.current.onDeleteNode(initialNodeRef.current.id);
     setShowDeleteConfirm(false);
   };
 
   const handleAddChild = () => {
-    onAddChild(node.id, node.x, node.y + 150);
+    propsRef.current.onAddChild(initialNodeRef.current.id, initialNodeRef.current.x, initialNodeRef.current.y + 150);
   };
 
   const handleTextSelect = () => {
@@ -210,20 +255,22 @@ export default memo(function ChatNodeComponent({
     if (selection && selection.toString().trim()) {
       const range = selection.getRangeAt(0);
       const rect = range.getBoundingClientRect();
-      onTextSelection(node.id, selection.toString(), rect.right, rect.top);
+      propsRef.current.onTextSelection(initialNodeRef.current.id, selection.toString(), rect.right, rect.top);
     }
   };
 
   return (
     <>
       <Card
-        className={`absolute min-w-80 max-w-96 transition-all duration-200 ${node.isUser ? "border-blue-200" : "border-green-200"
-          } ${isHovered ? "shadow-lg scale-105" : "shadow-md"}`}
+        ref={dragRef}
+        className={`absolute min-w-80 max-w-96 transition-all duration-200 ${initialNodeRef.current.isUser ? "border-blue-200" : "border-green-200"
+          } ${isHovered ? "shadow-lg scale-105" : "shadow-md"} ${isDragging ? "opacity-60 rotate-2 scale-95 cursor-grabbing" : "cursor-grab"}`}
         style={{
-          left: node.x,
-          top: node.y,
+          left: initialNodeRef.current.x,
+          top: initialNodeRef.current.y,
           transform: `scale(${Math.max(0.5, Math.min(1, 1 / zoom))})`,
           transformOrigin: "top left",
+          zIndex: isDragging ? 1000 : 1,
         }}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
@@ -235,7 +282,7 @@ export default memo(function ChatNodeComponent({
                 size="icon"
                 variant="outline"
                 className="w-6 h-6"
-                onClick={() => onBranch(node.id)}
+                onClick={() => propsRef.current.onBranch(initialNodeRef.current.id)}
                 title="Branch conversation"
               >
                 <GitBranch className="w-3 h-3" />
@@ -252,14 +299,14 @@ export default memo(function ChatNodeComponent({
             </div>
           )}
 
-          <div className={`text-xs mb-2 ${node.isUser ? "text-blue-600" : "text-green-600"}`}>
-            {node.isUser ? "You" : "AI"}
+          <div className={`text-xs mb-2 ${initialNodeRef.current.isUser ? "text-blue-600" : "text-green-600"}`}>
+            {initialNodeRef.current.isUser ? "You" : "AI"}
           </div>
 
-          {!node.isUser && node.thinking && (
+          {!initialNodeRef.current.isUser && initialNodeRef.current.thinking && (
             <ThinkingIndicator
-              thinking={node.thinking}
-              thinkingTime={node.thinkingTime}
+              thinking={initialNodeRef.current.thinking}
+              thinkingTime={initialNodeRef.current.thinkingTime}
               isThinking={false}
             />
           )}
@@ -272,12 +319,18 @@ export default memo(function ChatNodeComponent({
             />
           )}
 
-          {node.isEditing ? (
+          {isLocalEditing ? (
             <div className="space-y-2">
               <Textarea
                 ref={textareaRef}
-                value={node.content}
-                onChange={(e) => onUpdateNode(node.id, { content: e.target.value })}
+                value={localContent}
+                onChange={(e) => setLocalContent(e.target.value)}
+                onBlur={() => {
+                  // Only sync content when losing focus if content changed
+                  if (localContent !== initialNodeRef.current.content) {
+                    propsRef.current.onUpdateNode(initialNodeRef.current.id, { content: localContent });
+                  }
+                }}
                 placeholder="Type your message..."
                 className="min-h-20 resize-none"
                 onKeyDown={(e) => {
@@ -300,7 +353,7 @@ export default memo(function ChatNodeComponent({
                 <Button
                   size="sm"
                   onClick={handleSubmit}
-                  disabled={!node.content.trim() || !selectedProviderId || !selectedModel || isLoading}
+                  disabled={!localContent.trim() || !selectedProviderId || !selectedModel || isLoading}
                 >
                   <Send className="w-3 h-3 mr-1" />
                   {isLoading ? "Sending..." : "Send"}
@@ -328,12 +381,12 @@ export default memo(function ChatNodeComponent({
                 className="whitespace-pre-wrap select-text cursor-text"
                 onMouseUp={handleTextSelect}
               >
-                {node.content}
+                {localContent}
               </div>
             </>
           )}
 
-          {isHovered && !node.isEditing && (
+          {isHovered && !isLocalEditing && (
             <Button
               size="sm"
               variant="ghost"
@@ -386,4 +439,4 @@ export default memo(function ChatNodeComponent({
       )}
     </>
   );
-});
+}

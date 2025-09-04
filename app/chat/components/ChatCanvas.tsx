@@ -290,9 +290,13 @@ export default function ChatCanvas({
       const currentConversation = conversationRef.current;
       if (!currentConversation) return;
 
+      console.log('Moving node:', { nodeId, x, y });
+
       const updatedNodes = currentConversation.nodes.map((node) =>
         node.id === nodeId ? { ...node, x, y } : node,
       );
+
+      console.log('Updated nodes:', updatedNodes.find(n => n.id === nodeId));
 
       onUpdateConversationRef.current({
         ...currentConversation,
@@ -326,10 +330,24 @@ export default function ChatCanvas({
   const dotSize = 20 * zoom;
 
   // Canvas drop target component
-  function CanvasDropTarget({ children }: { children: React.ReactNode }) {
+  const CanvasDropTarget = useCallback(({ children }: { children: React.ReactNode }) => {
     const [{ isOver }, drop] = useDrop({
       accept: "node",
       drop: (item: { id: string; x: number; y: number }, monitor) => {
+        const clientOffset = monitor.getClientOffset();
+        const canvasElement = canvasRef.current;
+        
+        if (clientOffset && canvasElement) {
+          const rect = canvasElement.getBoundingClientRect();
+          
+          // Calculate position relative to the canvas, accounting for pan and zoom
+          const newX = (clientOffset.x - rect.left - pan.x) / zoom;
+          const newY = (clientOffset.y - rect.top - pan.y) / zoom;
+          
+          console.log('Drop position:', { newX, newY, clientOffset, pan, zoom });
+          moveNode(item.id, newX, newY);
+        }
+        
         return { dropped: true };
       },
       collect: (monitor) => ({
@@ -348,6 +366,7 @@ export default function ChatCanvas({
     return (
       <div
         ref={dropRef}
+        data-canvas="true"
         className={`w-full h-full overflow-hidden cursor-grab active:cursor-grabbing relative ${isOver ? "bg-blue-50/20" : ""
           }`}
         style={{
@@ -364,7 +383,7 @@ export default function ChatCanvas({
         {children}
       </div>
     );
-  }
+  }, [pan, zoom, moveNode, dotPattern, dotSize, handleCanvasClick, handleMouseDown, handleMouseMove, handleMouseUp, handleWheel]);
 
   return (
     <DndProvider backend={HTML5Backend}>
