@@ -30,6 +30,13 @@ export default function ThinkingIndicator({ thinking, thinkingTime, isThinking }
         };
     }, [isThinking, thinkingTime]);
 
+    // Auto-expand when thinking to show real-time thinking output
+    useEffect(() => {
+        if (isThinking) {
+            setIsExpanded(true);
+        }
+    }, [isThinking]);
+
     if (!thinking && !isThinking) {
         return null;
     }
@@ -44,13 +51,15 @@ export default function ThinkingIndicator({ thinking, thinkingTime, isThinking }
     };
 
     return (
-        <Card className="mb-2 border-gray-200 bg-gray-50">
+        <Card className={`mb-2 border-gray-200 ${isThinking ? 'bg-blue-50 border-blue-200' : 'bg-gray-50'
+            }`}>
             <CardContent className="p-3">
                 <Button
                     variant="ghost"
                     size="sm"
                     className="w-full justify-between p-0 h-auto text-sm text-gray-600 hover:bg-transparent"
-                    onClick={() => setIsExpanded(!isExpanded)}
+                    onClick={() => !isThinking && setIsExpanded(!isExpanded)}
+                    disabled={isThinking}
                 >
                     <div className="flex items-center gap-2">
                         <Brain className="w-4 h-4" />
@@ -61,14 +70,15 @@ export default function ThinkingIndicator({ thinking, thinkingTime, isThinking }
                             }
                         </span>
                     </div>
-                    {(thinking || isThinking) && (
+                    {(thinking || isThinking) && !isThinking && (
                         isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />
                     )}
                 </Button>
 
-                {isExpanded && (thinking || isThinking) && (
+                {(isExpanded || isThinking) && (thinking || isThinking) && (
                     <div className="mt-2 pt-2 border-t border-gray-200">
-                        <div className="text-sm text-gray-500 whitespace-pre-wrap font-mono leading-relaxed">
+                        <div className={`text-sm whitespace-pre-wrap font-mono leading-relaxed ${isThinking ? 'text-gray-700' : 'text-gray-500'
+                            }`}>
                             {thinking || "Thinking..."}
                             {isThinking && (
                                 <span className="inline-block w-2 h-4 bg-gray-400 ml-1 animate-pulse" />
