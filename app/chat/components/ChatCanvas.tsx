@@ -1,11 +1,9 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
-import { DndProvider } from "react-dnd";
-import { HTML5Backend } from "react-dnd-html5-backend";
-import { useDrop } from "react-dnd";
 import { ChatConversation, ChatNode } from "../page";
 import ChatNodeComponent from "./ChatNode";
+import { getLastUsedProviderAndModel, getUserPreferences } from "@/lib/storage";
 
 interface ChatCanvasProps {
   conversation: ChatConversation | null;
@@ -43,9 +41,15 @@ export default function ChatCanvas({
     onUpdateConversationRef.current = onUpdateConversation;
   }, [conversation, onUpdateConversation]);
 
-  const handleCanvasClick = useCallback(
+  const handleCanvasDoubleClick = useCallback(
     (e: React.MouseEvent) => {
-      if (e.target === canvasRef.current && !isPanning) {
+      // Check if double-click is on canvas area and not on a node or interactive element
+      const target = e.target as HTMLElement;
+      const isOnCanvas = target === canvasRef.current ||
+        (target.getAttribute('data-canvas') === 'true') ||
+        (target.closest('[data-canvas="true"]') && !target.closest('[data-node="true"]') && !target.closest('button') && !target.closest('textarea') && !target.closest('[data-interactive="true"]'));
+
+      if (isOnCanvas && !isPanning) {
         const rect = canvasRef.current!.getBoundingClientRect();
         const x = (e.clientX - rect.left - pan.x) / zoom;
         const y = (e.clientY - rect.top - pan.y) / zoom;
@@ -85,9 +89,16 @@ export default function ChatCanvas({
   );
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if (e.target === canvasRef.current) {
+    // Allow panning when clicking on canvas area, but not on interactive elements or draggable nodes
+    const target = e.target as HTMLElement;
+    const isOnCanvas = target === canvasRef.current ||
+      (target.getAttribute('data-canvas') === 'true') ||
+      (target.closest('[data-canvas="true"]') && !target.closest('[data-node="true"]') && !target.closest('button') && !target.closest('textarea') && !target.closest('[data-interactive="true"]'));
+
+    if (isOnCanvas) {
       setIsPanning(true);
       setLastPanPoint({ x: e.clientX, y: e.clientY });
+      e.preventDefault(); // Prevent text selection while panning
     }
   }, []);
 
@@ -187,7 +198,8 @@ export default function ChatCanvas({
       if (!currentConversation) return;
 
       if (aiResponse) {
-        // Add the provided AI response node
+        // Add the provided AI response node with parentId set
+        const aiResponseWithParent = { ...aiResponse, parentId };
         const updatedNodes = currentConversation.nodes.map((node) =>
           node.id === parentId
             ? { ...node, childIds: [...node.childIds, aiResponse.id] }
@@ -196,7 +208,7 @@ export default function ChatCanvas({
 
         onUpdateConversationRef.current({
           ...currentConversation,
-          nodes: [...updatedNodes, aiResponse],
+          nodes: [...updatedNodes, aiResponseWithParent],
         });
       } else {
         // Create a new user input node
@@ -329,164 +341,132 @@ export default function ChatCanvas({
   const dotPattern = `radial-gradient(circle, rgba(156, 163, 175, 0.3) 1px, transparent 1px)`;
   const dotSize = 20 * zoom;
 
-  // Canvas drop target component
-  const CanvasDropTarget = useCallback(({ children }: { children: React.ReactNode }) => {
-    const [{ isOver }, drop] = useDrop({
-      accept: "node",
-      drop: (item: { id: string; x: number; y: number }, monitor) => {
-        const clientOffset = monitor.getClientOffset();
-        const canvasElement = canvasRef.current;
-        
-        if (clientOffset && canvasElement) {
-          const rect = canvasElement.getBoundingClientRect();
-          
-          // Calculate position relative to the canvas, accounting for pan and zoom
-          const newX = (clientOffset.x - rect.left - pan.x) / zoom;
-          const newY = (clientOffset.y - rect.top - pan.y) / zoom;
-          
-          console.log('Drop position:', { newX, newY, clientOffset, pan, zoom });
-          moveNode(item.id, newX, newY);
-        }
-        
-        return { dropped: true };
-      },
-      collect: (monitor) => ({
-        isOver: monitor.isOver(),
-      }),
-    });
-
-    const dropRef = useRef<HTMLDivElement>(null);
-
-    useEffect(() => {
-      if (dropRef.current) {
-        drop(dropRef.current);
-      }
-    }, [drop]);
-
-    return (
-      <div
-        ref={dropRef}
-        data-canvas="true"
-        className={`w-full h-full overflow-hidden cursor-grab active:cursor-grabbing relative ${isOver ? "bg-blue-50/20" : ""
-          }`}
-        style={{
-          backgroundImage: dotPattern,
-          backgroundSize: `${dotSize}px ${dotSize}px`,
-          backgroundPosition: `${pan.x % dotSize}px ${pan.y % dotSize}px`,
-        }}
-        onClick={handleCanvasClick}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onWheel={handleWheel}
-      >
-        {children}
-      </div>
-    );
-  }, [pan, zoom, moveNode, dotPattern, dotSize, handleCanvasClick, handleMouseDown, handleMouseMove, handleMouseUp, handleWheel]);
-
   return (
-    <DndProvider backend={HTML5Backend}>
-      <CanvasDropTarget>
-        <div
-          ref={canvasRef}
-          style={{
-            transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-            transformOrigin: "0 0",
-          }}
-          className="absolute inset-0"
-        >
-          {!conversation || conversation.nodes.length === 0 ? (
-            <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-muted-foreground text-xl pointer-events-none">
-              Click anywhere to start chatting!
-            </div>
-          ) : (
-            <>
-              {conversation.nodes.map((node) => (
-                <ChatNodeComponent
-                  key={node.id}
-                  node={node}
-                  onUpdateNode={updateNode}
-                  onDeleteNode={deleteNode}
-                  onAddChild={addChildNode}
-                  onBranch={branchNode}
-                  onTextSelection={handleTextSelection}
-                  onMoveNode={moveNode}
-                  onNodeClick={handleNodeClick}
-                  zoom={zoom}
-                />
-              ))}
-
-              {conversation.nodes.map((node) =>
-                node.childIds.map((childId) => {
-                  const childNode = conversation.nodes.find(
-                    (n) => n.id === childId,
-                  );
-                  if (!childNode) return null;
-
-                  const isHighlighted = false;
-
-                  return (
-                    <svg
-                      key={`edge-${node.id}-${childId}`}
-                      className="absolute pointer-events-none"
-                      style={{
-                        left: Math.min(node.x, childNode.x) - 10,
-                        top: Math.min(node.y, childNode.y) - 10,
-                        width: Math.abs(childNode.x - node.x) + 20,
-                        height: Math.abs(childNode.y - node.y) + 20,
-                      }}
-                    >
-                      <defs>
-                        <marker
-                          id={`arrowhead-${node.id}-${childId}`}
-                          markerWidth="10"
-                          markerHeight="7"
-                          refX="9"
-                          refY="3.5"
-                          orient="auto"
-                        >
-                          <polygon
-                            points="0 0, 10 3.5, 0 7"
-                            fill={isHighlighted ? "rgba(59, 130, 246, 0.8)" : "rgba(156, 163, 175, 0.5)"}
-                          />
-                        </marker>
-                      </defs>
-                      <line
-                        x1={node.x - Math.min(node.x, childNode.x) + 10}
-                        y1={node.y - Math.min(node.y, childNode.y) + 10}
-                        x2={childNode.x - Math.min(node.x, childNode.x) + 10}
-                        y2={childNode.y - Math.min(node.y, childNode.y) + 10}
-                        stroke={isHighlighted ? "rgba(59, 130, 246, 0.8)" : "rgba(156, 163, 175, 0.5)"}
-                        strokeWidth={isHighlighted ? "3" : "2"}
-                        markerEnd={`url(#arrowhead-${node.id}-${childId})`}
-                        className="transition-all duration-200"
-                      />
-                    </svg>
-                  );
-                }),
-              )}
-            </>
-          )}
-        </div>
-
-        {selectedText && (
-          <div
-            className="absolute z-50"
-            style={{
-              left: selectedText.x + pan.x,
-              top: selectedText.y + pan.y - 40,
-            }}
-          >
-            <button
-              onClick={handleReplyToSelection}
-              className="bg-primary text-primary-foreground px-3 py-1 rounded text-sm hover:bg-primary/90"
-            >
-              Reply to Selection
-            </button>
+    <div
+      ref={canvasRef}
+      data-canvas="true"
+      className="w-full h-full overflow-hidden cursor-grab active:cursor-grabbing relative"
+      style={{
+        backgroundImage: dotPattern,
+        backgroundSize: `${dotSize}px ${dotSize}px`,
+        backgroundPosition: `${pan.x % dotSize}px ${pan.y % dotSize}px`,
+      }}
+      onDoubleClick={handleCanvasDoubleClick}
+      onMouseDown={handleMouseDown}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
+      onWheel={handleWheel}
+    >
+      <div
+        data-canvas="true"
+        style={{
+          transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+          transformOrigin: "0 0",
+        }}
+        className="absolute inset-0"
+      >
+        {!conversation || conversation.nodes.length === 0 ? (
+          <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-muted-foreground text-xl pointer-events-none" data-canvas="true">
+            Double-click anywhere to start chatting!
           </div>
+        ) : (
+          <>
+            {conversation.nodes.map((node) => (
+              <ChatNodeComponent
+                key={node.id}
+                node={node}
+                onUpdateNode={updateNode}
+                onDeleteNode={deleteNode}
+                onAddChild={addChildNode}
+                onBranch={branchNode}
+                onTextSelection={handleTextSelection}
+                onMoveNode={moveNode}
+                onNodeClick={handleNodeClick}
+                zoom={zoom}
+              />
+            ))}
+
+            {conversation.nodes.map((node) =>
+              node.childIds.map((childId) => {
+                const childNode = conversation.nodes.find(
+                  (n) => n.id === childId,
+                );
+                if (!childNode) return null;
+
+                const isHighlighted = false;
+
+                // Calculate connection points (center bottom of parent to center top of child)
+                const parentCenterX = node.x + 192; // Assuming node width is ~384px (min-w-96)
+                const parentBottomY = node.y + 120; // Assuming approximate node height
+                const childCenterX = childNode.x + 192;
+                const childTopY = childNode.y;
+
+                // Calculate SVG container bounds
+                const minX = Math.min(parentCenterX, childCenterX) - 50;
+                const minY = Math.min(parentBottomY, childTopY) - 50;
+                const maxX = Math.max(parentCenterX, childCenterX) + 50;
+                const maxY = Math.max(parentBottomY, childTopY) + 50;
+
+                return (
+                  <svg
+                    key={`edge-${node.id}-${childId}`}
+                    className="absolute pointer-events-none z-10"
+                    style={{
+                      left: minX,
+                      top: minY,
+                      width: maxX - minX,
+                      height: maxY - minY,
+                    }}
+                  >
+                    <defs>
+                      <marker
+                        id={`arrowhead-${node.id}-${childId}`}
+                        markerWidth="10"
+                        markerHeight="7"
+                        refX="9"
+                        refY="3.5"
+                        orient="auto"
+                      >
+                        <polygon
+                          points="0 0, 10 3.5, 0 7"
+                          fill={isHighlighted ? "rgba(59, 130, 246, 0.8)" : "rgba(100, 116, 139, 0.7)"}
+                        />
+                      </marker>
+                    </defs>
+                    <line
+                      x1={parentCenterX - minX}
+                      y1={parentBottomY - minY}
+                      x2={childCenterX - minX}
+                      y2={childTopY - minY}
+                      stroke={isHighlighted ? "rgba(59, 130, 246, 0.8)" : "rgba(100, 116, 139, 0.7)"}
+                      strokeWidth={isHighlighted ? "3" : "2"}
+                      markerEnd={`url(#arrowhead-${node.id}-${childId})`}
+                      className="transition-all duration-200"
+                    />
+                  </svg>
+                );
+              }),
+            )}
+          </>
         )}
-      </CanvasDropTarget>
-    </DndProvider>
+      </div>
+
+      {selectedText && (
+        <div
+          className="absolute z-50"
+          style={{
+            left: selectedText.x + pan.x,
+            top: selectedText.y + pan.y - 40,
+          }}
+        >
+          <button
+            onClick={handleReplyToSelection}
+            className="bg-primary text-primary-foreground px-3 py-1 rounded text-sm hover:bg-primary/90"
+          >
+            Reply to Selection
+          </button>
+        </div>
+      )}
+    </div>
   );
 }

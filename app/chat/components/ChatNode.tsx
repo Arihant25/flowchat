@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { useDrag } from "react-dnd";
+import { motion } from "framer-motion";
 import { ChatNode } from "../page";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Plus, X, GitBranch, Send } from "lucide-react";
 import ProviderModelSelector from "@/components/ui/provider-model-selector";
 import ThinkingIndicator from "@/components/ui/thinking-indicator";
-import { getUserPreferences } from "@/lib/storage";
+import { getUserPreferences, saveLastUsedProviderAndModel, getLastUsedProviderAndModel } from "@/lib/storage";
 import { ChatMessage, StreamingResponse } from "@/lib/types";
 
 interface ChatNodeComponentProps {
@@ -46,7 +46,7 @@ export default function ChatNodeComponent({
   const [streamingResponse, setStreamingResponse] = useState<StreamingResponse | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-  const dragRef = useRef<HTMLDivElement>(null);
+  const [hasInitialized, setHasInitialized] = useState(false);
 
   // Use refs to store initial values and prevent re-renders
   const initialNodeRef = useRef(node);
@@ -55,34 +55,6 @@ export default function ChatNodeComponent({
   // Update refs when props change but don't cause re-renders
   propsRef.current = { onUpdateNode, onDeleteNode, onAddChild, onBranch, onTextSelection, onMoveNode, onNodeClick };
 
-  // Drag and drop functionality
-  const [{ isDragging }, drag, preview] = useDrag({
-    type: "node",
-    item: () => {
-      console.log('Drag started for node:', initialNodeRef.current.id);
-      return { 
-        id: initialNodeRef.current.id, 
-        x: initialNodeRef.current.x, 
-        y: initialNodeRef.current.y 
-      };
-    },
-    end: (item, monitor) => {
-      console.log('Drag ended:', { item, didDrop: monitor.didDrop() });
-    },
-    collect: (monitor) => ({
-      isDragging: monitor.isDragging(),
-    }),
-  });
-
-  // Combine drag ref with card ref
-  useEffect(() => {
-    if (dragRef.current) {
-      drag(dragRef.current);
-      // Use the actual node as the drag preview instead of an empty image
-      preview(dragRef.current);
-    }
-  }, [drag, preview]);
-
   useEffect(() => {
     if (isLocalEditing && textareaRef.current) {
       textareaRef.current.focus();
@@ -90,15 +62,33 @@ export default function ChatNodeComponent({
   }, [isLocalEditing]);
 
   useEffect(() => {
-    // Load user preferences for default provider/model
+    // Load user preferences for default provider/model and last used settings
     const loadDefaults = async () => {
+      // Only run once per component instance
+      if (hasInitialized) {
+        return;
+      }
+
       const preferences = getUserPreferences();
-      if (preferences.defaultProvider && !selectedProviderId) {
+      const lastUsed = getLastUsedProviderAndModel();
+
+      // For new nodes (editing), prefer last used settings, fall back to default
+      if (node.isEditing) {
+        if (lastUsed.providerId && lastUsed.model) {
+          setSelectedProviderId(lastUsed.providerId);
+          setSelectedModel(lastUsed.model);
+        } else if (preferences.defaultProvider) {
+          setSelectedProviderId(preferences.defaultProvider);
+        }
+      } else if (preferences.defaultProvider) {
+        // For existing nodes, just load default if nothing selected
         setSelectedProviderId(preferences.defaultProvider);
       }
+
+      setHasInitialized(true);
     };
     loadDefaults();
-  }, [selectedProviderId]);
+  }, []); // Run only on mount
 
   const buildConversationHistory = (): ChatMessage[] => {
     // This would need to be implemented to build the actual conversation history
@@ -179,6 +169,9 @@ export default function ChatNodeComponent({
                 }
 
                 if (parsed.isComplete) {
+                  // Save the successfully used provider and model for future use
+                  saveLastUsedProviderAndModel(selectedProviderId, selectedModel);
+
                   // Create AI response node
                   const aiResponse: ChatNode = {
                     id: `node-${Date.now()}-ai`,
@@ -261,150 +254,170 @@ export default function ChatNodeComponent({
 
   return (
     <>
-      <Card
-        ref={dragRef}
-        className={`absolute min-w-80 max-w-96 transition-all duration-200 ${initialNodeRef.current.isUser ? "border-blue-200" : "border-green-200"
-          } ${isHovered ? "shadow-lg scale-105" : "shadow-md"} ${isDragging ? "opacity-60 rotate-2 scale-95 cursor-grabbing" : "cursor-grab"}`}
-        style={{
-          left: initialNodeRef.current.x,
-          top: initialNodeRef.current.y,
-          transform: `scale(${Math.max(0.5, Math.min(1, 1 / zoom))})`,
-          transformOrigin: "top left",
-          zIndex: isDragging ? 1000 : 1,
+      <motion.div
+        drag
+        dragMomentum={false}
+        dragElastic={0.1}
+        dragConstraints={false}
+        onDragEnd={(event, info) => {
+          const newX = initialNodeRef.current.x + info.offset.x;
+          const newY = initialNodeRef.current.y + info.offset.y;
+          propsRef.current.onMoveNode(initialNodeRef.current.id, newX, newY);
         }}
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
+        initial={{ x: 0, y: 0 }}
+        animate={{ x: 0, y: 0 }}
+        whileDrag={{
+          scale: 0.95,
+          rotate: 2,
+          zIndex: 1000,
+          boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)"
+        }}
+        transition={{
+          type: "spring",
+          stiffness: 500,
+          damping: 30
+        }}
       >
-        <CardContent className="p-4 relative">
-          {isHovered && (
-            <div className="absolute -top-2 -right-2 flex gap-1">
-              <Button
-                size="icon"
-                variant="outline"
-                className="w-6 h-6"
-                onClick={() => propsRef.current.onBranch(initialNodeRef.current.id)}
-                title="Branch conversation"
-              >
-                <GitBranch className="w-3 h-3" />
-              </Button>
-              <Button
-                size="icon"
-                variant="outline"
-                className="w-6 h-6"
-                onClick={handleDelete}
-                title="Delete node"
-              >
-                <X className="w-3 h-3" />
-              </Button>
-            </div>
-          )}
-
-          <div className={`text-xs mb-2 ${initialNodeRef.current.isUser ? "text-blue-600" : "text-green-600"}`}>
-            {initialNodeRef.current.isUser ? "You" : "AI"}
-          </div>
-
-          {!initialNodeRef.current.isUser && initialNodeRef.current.thinking && (
-            <ThinkingIndicator
-              thinking={initialNodeRef.current.thinking}
-              thinkingTime={initialNodeRef.current.thinkingTime}
-              isThinking={false}
-            />
-          )}
-
-          {streamingResponse && (
-            <ThinkingIndicator
-              thinking={streamingResponse.thinking}
-              thinkingTime={streamingResponse.thinkingTime}
-              isThinking={streamingResponse.isThinking}
-            />
-          )}
-
-          {isLocalEditing ? (
-            <div className="space-y-2">
-              <Textarea
-                ref={textareaRef}
-                value={localContent}
-                onChange={(e) => setLocalContent(e.target.value)}
-                onBlur={() => {
-                  // Only sync content when losing focus if content changed
-                  if (localContent !== initialNodeRef.current.content) {
-                    propsRef.current.onUpdateNode(initialNodeRef.current.id, { content: localContent });
-                  }
-                }}
-                placeholder="Type your message..."
-                className="min-h-20 resize-none"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && e.ctrlKey) {
-                    handleSubmit();
-                  }
-                }}
-              />
-
-              {/* Provider and Model Selection */}
-              <ProviderModelSelector
-                selectedProviderId={selectedProviderId}
-                selectedModel={selectedModel}
-                onProviderChange={setSelectedProviderId}
-                onModelChange={setSelectedModel}
-                className="mb-2"
-              />
-
-              <div className="flex justify-end gap-2">
+        <Card
+          data-node="true"
+          className={`absolute min-w-80 max-w-96 transition-all duration-200 ${initialNodeRef.current.isUser ? "border-blue-200" : "border-green-200"
+            } ${isHovered ? "shadow-lg scale-105" : "shadow-md"} cursor-grab z-20`}
+          style={{
+            left: initialNodeRef.current.x,
+            top: initialNodeRef.current.y,
+            transform: `scale(${Math.max(0.5, Math.min(1, 1 / zoom))})`,
+            transformOrigin: "top left",
+          }}
+          onMouseEnter={() => setIsHovered(true)}
+          onMouseLeave={() => setIsHovered(false)}
+        >
+          <CardContent className="p-4 relative">
+            {isHovered && (
+              <div className="absolute -top-2 -right-2 flex gap-1">
                 <Button
-                  size="sm"
-                  onClick={handleSubmit}
-                  disabled={!localContent.trim() || !selectedProviderId || !selectedModel || isLoading}
+                  size="icon"
+                  variant="outline"
+                  className="w-6 h-6"
+                  onClick={() => propsRef.current.onBranch(initialNodeRef.current.id)}
+                  title="Branch conversation"
                 >
-                  <Send className="w-3 h-3 mr-1" />
-                  {isLoading ? "Sending..." : "Send"}
+                  <GitBranch className="w-3 h-3" />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="outline"
+                  className="w-6 h-6"
+                  onClick={handleDelete}
+                  title="Delete node"
+                >
+                  <X className="w-3 h-3" />
                 </Button>
               </div>
+            )}
+
+            <div className={`text-xs mb-2 ${initialNodeRef.current.isUser ? "text-blue-600" : "text-green-600"}`}>
+              {initialNodeRef.current.isUser ? "You" : "AI"}
             </div>
-          ) : (
-            <>
-              {streamingResponse && !streamingResponse.isComplete && (
-                <div className="mb-2">
-                  <div className="text-sm text-muted-foreground mb-1">
-                    {streamingResponse.isThinking ? "Thinking..." : "Responding..."}
-                  </div>
-                  <div className="whitespace-pre-wrap">
-                    {streamingResponse.content}
-                    {!streamingResponse.isThinking && (
-                      <span className="inline-block w-2 h-4 bg-primary ml-1 animate-pulse" />
-                    )}
-                  </div>
+
+            {!initialNodeRef.current.isUser && initialNodeRef.current.thinking && (
+              <ThinkingIndicator
+                thinking={initialNodeRef.current.thinking}
+                thinkingTime={initialNodeRef.current.thinkingTime}
+                isThinking={false}
+              />
+            )}
+
+            {streamingResponse && (
+              <ThinkingIndicator
+                thinking={streamingResponse.thinking}
+                thinkingTime={streamingResponse.thinkingTime}
+                isThinking={streamingResponse.isThinking}
+              />
+            )}
+
+            {isLocalEditing ? (
+              <div className="space-y-2">
+                <Textarea
+                  ref={textareaRef}
+                  value={localContent}
+                  onChange={(e) => setLocalContent(e.target.value)}
+                  onBlur={() => {
+                    // Only sync content when losing focus if content changed
+                    if (localContent !== initialNodeRef.current.content) {
+                      propsRef.current.onUpdateNode(initialNodeRef.current.id, { content: localContent });
+                    }
+                  }}
+                  placeholder="Type your message..."
+                  className="min-h-20 resize-none"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && e.ctrlKey) {
+                      handleSubmit();
+                    }
+                  }}
+                />
+
+                {/* Provider and Model Selection */}
+                <ProviderModelSelector
+                  selectedProviderId={selectedProviderId}
+                  selectedModel={selectedModel}
+                  onProviderChange={setSelectedProviderId}
+                  onModelChange={setSelectedModel}
+                  className="mb-2"
+                  autoSelectDefault={false}
+                  preserveModelOnProviderChange={true}
+                />
+
+                <div className="flex justify-end gap-2">
+                  <Button
+                    size="sm"
+                    onClick={handleSubmit}
+                    disabled={!localContent.trim() || !selectedProviderId || !selectedModel || isLoading}
+                  >
+                    <Send className="w-3 h-3 mr-1" />
+                    {isLoading ? "Sending..." : "Send"}
+                  </Button>
                 </div>
-              )}
-
-              <div
-                ref={contentRef}
-                className="whitespace-pre-wrap select-text cursor-text"
-                onMouseUp={handleTextSelect}
-              >
-                {localContent}
               </div>
-            </>
-          )}
+            ) : (
+              <>
+                {streamingResponse && !streamingResponse.isComplete && (
+                  <div className="mb-2">
+                    <div className="text-sm text-muted-foreground mb-1">
+                      {streamingResponse.isThinking ? "Thinking..." : "Responding..."}
+                    </div>
+                    <div className="whitespace-pre-wrap">
+                      {streamingResponse.content}
+                      {!streamingResponse.isThinking && (
+                        <span className="inline-block w-2 h-4 bg-primary ml-1 animate-pulse" />
+                      )}
+                    </div>
+                  </div>
+                )}
 
-          {isHovered && !isLocalEditing && (
-            <Button
-              size="sm"
-              variant="ghost"
-              className="absolute -bottom-8 left-1/2 transform -translate-x-1/2 w-8 h-8 p-0"
-              onClick={handleAddChild}
-              title="Add follow-up message"
-            >
-              <Plus className="w-4 h-4" />
-            </Button>
-          )}
+                <div
+                  ref={contentRef}
+                  className="whitespace-pre-wrap select-text cursor-text"
+                  onMouseUp={handleTextSelect}
+                >
+                  {localContent}
+                </div>
+              </>
+            )}
 
-          {isLoading && (
-            <div className="absolute inset-0 bg-background/50 flex items-center justify-center">
-              <div className="animate-spin w-4 h-4 border-2 border-primary border-t-transparent rounded-full" />
-            </div>
-          )}
-        </CardContent>
-      </Card>
+            {isHovered && !isLocalEditing && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="absolute -bottom-8 left-1/2 transform -translate-x-1/2 w-8 h-8 p-0"
+                onClick={handleAddChild}
+                title="Add follow-up message"
+              >
+                <Plus className="w-4 h-4" />
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+      </motion.div>
 
       {showDeleteConfirm && (
         <div className="fixed inset-0 bg-background/80 flex items-center justify-center z-50">

@@ -229,6 +229,37 @@ export function saveUserPreferences(preferences: Partial<UserPreferences>): void
     }
 }
 
+// Save last used provider and model
+export function saveLastUsedProviderAndModel(providerId: string, model: string): void {
+    if (typeof window === "undefined") return;
+
+    try {
+        saveUserPreferences({
+            lastUsedProvider: providerId,
+            lastUsedModel: model
+        });
+    } catch (error) {
+        console.error("Error saving last used provider and model:", error);
+    }
+}
+
+// Get last used provider and model
+export function getLastUsedProviderAndModel(): { providerId: string; model: string } {
+    if (typeof window === "undefined") return { providerId: "", model: "" };
+
+    try {
+        const preferences = getUserPreferences();
+        const result = {
+            providerId: preferences.lastUsedProvider || "",
+            model: preferences.lastUsedModel || ""
+        };
+        return result;
+    } catch (error) {
+        console.error("Error getting last used provider and model:", error);
+        return { providerId: "", model: "" };
+    }
+}
+
 export function getCachedModels(provider: AIProvider): ModelInfo[] {
     if (typeof window === "undefined") return [];
 

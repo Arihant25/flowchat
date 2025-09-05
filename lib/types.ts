@@ -126,6 +126,8 @@ export interface UserPreferences {
     systemPrompt: string;
     fontFamily: string;
     theme: "light" | "dark" | "system";
+    lastUsedProvider: string; // Last used provider config ID
+    lastUsedModel: string; // Last used model ID
 }
 
 export const DEFAULT_USER_PREFERENCES: UserPreferences = {
@@ -134,4 +136,6 @@ export const DEFAULT_USER_PREFERENCES: UserPreferences = {
     systemPrompt: "",
     fontFamily: "inter",
     theme: "system",
+    lastUsedProvider: "",
+    lastUsedModel: "",
 };

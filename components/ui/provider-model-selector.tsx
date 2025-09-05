@@ -21,6 +21,8 @@ interface ProviderModelSelectorProps {
     onProviderChange: (providerId: string) => void;
     onModelChange: (model: string) => void;
     className?: string;
+    autoSelectDefault?: boolean; // New prop to control auto-selection
+    preserveModelOnProviderChange?: boolean; // New prop to control model clearing
 }
 
 export default memo(function ProviderModelSelector({
@@ -29,6 +31,8 @@ export default memo(function ProviderModelSelector({
     onProviderChange,
     onModelChange,
     className = "",
+    autoSelectDefault = true, // Default to true for backward compatibility
+    preserveModelOnProviderChange = false, // Default to false for backward compatibility
 }: ProviderModelSelectorProps) {
     const [providers, setProviders] = useState<APIProviderConfig[]>([]);
     const [models, setModels] = useState<ModelInfo[]>([]);
@@ -53,8 +57,8 @@ export default memo(function ProviderModelSelector({
                 setProviders(data.providers || []);
                 setHasLoadedProviders(true);
 
-                // If no provider is selected, select the first default one
-                if (!selectedProviderId && data.providers?.length > 0) {
+                // If no provider is selected, select the first default one (only if autoSelectDefault is true)
+                if (!selectedProviderId && data.providers?.length > 0 && autoSelectDefault) {
                     const defaultProvider = data.providers.find((p: any) => p.isDefault) || data.providers[0];
                     onProviderChange(defaultProvider.id);
                 }
@@ -79,7 +83,8 @@ export default memo(function ProviderModelSelector({
             // Only clear models and selection when switching providers, not on refresh
             if (!refresh) {
                 setModels([]);
-                if (selectedModel) {
+                // Only clear model selection if we're not preserving it
+                if (selectedModel && !preserveModelOnProviderChange) {
                     onModelChange("");
                 }
             }
