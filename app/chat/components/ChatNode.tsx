@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { motion } from "framer-motion";
 import { ChatNode } from "../page";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -22,6 +21,7 @@ interface ChatNodeComponentProps {
   onMoveNode: (nodeId: string, x: number, y: number) => void;
   onNodeClick?: (nodeId: string, event: React.MouseEvent) => void;
   zoom: number;
+  getNodeById: (id: string) => ChatNode | undefined;
 }
 
 export default function ChatNodeComponent({
@@ -34,6 +34,7 @@ export default function ChatNodeComponent({
   onMoveNode,
   onNodeClick,
   zoom,
+  getNodeById,
 }: ChatNodeComponentProps) {
   const [localContent, setLocalContent] = useState(node.content);
   const [isLocalEditing, setIsLocalEditing] = useState(node.isEditing);
@@ -46,13 +47,29 @@ export default function ChatNodeComponent({
   const [streamingResponse, setStreamingResponse] = useState<StreamingResponse | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
   const [hasInitialized, setHasInitialized] = useState(false);
 
   // Use refs to store initial values and prevent re-renders
   const initialNodeRef = useRef(node);
   const propsRef = useRef({ onUpdateNode, onDeleteNode, onAddChild, onBranch, onTextSelection, onMoveNode, onNodeClick });
 
+  // Dragging state for D3-style interactions
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+
   // Update refs when props change but don't cause re-renders
+  useEffect(() => {
+    initialNodeRef.current = node;
+  }, [node]);
+
+  // Update local state when node changes
+  useEffect(() => {
+    setLocalContent(node.content);
+    setIsLocalEditing(node.isEditing ?? false);
+  }, [node.content, node.isEditing]);
+
   propsRef.current = { onUpdateNode, onDeleteNode, onAddChild, onBranch, onTextSelection, onMoveNode, onNodeClick };
 
   useEffect(() => {
@@ -91,10 +108,48 @@ export default function ChatNodeComponent({
   }, []); // Run only on mount
 
   const buildConversationHistory = (): ChatMessage[] => {
-    // This would need to be implemented to build the actual conversation history
-    // For now, we'll return an empty array
-    // TODO: Build proper conversation history from the node tree
-    return [];
+    const history: ChatMessage[] = [];
+    const conversationPath: ChatNode[] = [];
+
+    // First, build the complete path from root to current node
+    let currentNode: ChatNode | undefined = node;
+    while (currentNode) {
+      conversationPath.unshift(currentNode); // Add to beginning to get root-to-current order
+      currentNode = currentNode.parentId ? getNodeById(currentNode.parentId) : undefined;
+    }
+
+    // Now convert the path to messages, excluding the current node since it will be added separately
+    for (let i = 0; i < conversationPath.length - 1; i++) {
+      const pathNode = conversationPath[i];
+      // Include all nodes with content (both user prompts and AI responses)
+      if (pathNode.content.trim()) {
+        const message: ChatMessage = {
+          role: pathNode.isUser ? 'user' : 'assistant',
+          content: pathNode.content,
+        };
+        history.push(message);
+      }
+    }
+
+    console.log('Built conversation path for node:', node.id);
+    console.log('Full conversation path:', conversationPath.map(n => ({ id: n.id, isUser: n.isUser, content: n.content.substring(0, 50) + '...' })));
+    console.log('Conversation history being sent:', history);
+    return history;
+  };
+
+  const calculateCardHeight = (): number => {
+    let cardHeight = 200; // Increased default fallback height
+
+    if (cardRef.current) {
+      // Force layout calculation by accessing offsetHeight
+      const actualHeight = cardRef.current.offsetHeight;
+      if (actualHeight > 0) {
+        // Use the actual rendered height
+        cardHeight = actualHeight;
+      }
+    }
+
+    return cardHeight;
   };
 
   const handleSubmit = async () => {
@@ -105,10 +160,30 @@ export default function ChatNodeComponent({
     setIsLocalEditing(false);
 
     // Update the parent state only once at the end
-    propsRef.current.onUpdateNode(initialNodeRef.current.id, {
+    propsRef.current.onUpdateNode(node.id, {
       content: localContent,
       isEditing: false
     });
+
+    // Calculate dynamic position for AI response based on prompt card height
+    const responseX = node.x;
+    const cardHeight = calculateCardHeight();
+    const responseY = node.y + cardHeight + 60;
+
+    // Create AI response node immediately before starting the stream
+    const aiResponseId = `node-${Date.now()}-ai`;
+    const aiResponse: ChatNode = {
+      id: aiResponseId,
+      content: "", // Start empty, will be updated during streaming
+      isUser: false,
+      x: responseX,
+      y: responseY,
+      parentId: node.id,
+      childIds: [],
+    };
+
+    // Add the AI response node immediately
+    propsRef.current.onAddChild(node.id, responseX, responseY, aiResponse);
 
     try {
       const preferences = getUserPreferences();
@@ -156,7 +231,6 @@ export default function ChatNodeComponent({
 
               try {
                 const parsed: StreamingResponse = JSON.parse(data);
-                setStreamingResponse(parsed);
 
                 if (parsed.content) {
                   aiContent = parsed.content;
@@ -168,26 +242,16 @@ export default function ChatNodeComponent({
                   thinkingTime = parsed.thinkingTime;
                 }
 
+                // Update the AI response node with the streaming content
+                propsRef.current.onUpdateNode(aiResponseId, {
+                  content: aiContent,
+                  thinking: thinking || undefined,
+                  thinkingTime: thinkingTime || undefined,
+                });
+
                 if (parsed.isComplete) {
                   // Save the successfully used provider and model for future use
                   saveLastUsedProviderAndModel(selectedProviderId, selectedModel);
-
-                  // Create AI response node
-                  const aiResponse: ChatNode = {
-                    id: `node-${Date.now()}-ai`,
-                    content: aiContent,
-                    thinking: thinking || undefined,
-                    thinkingTime: thinkingTime || undefined,
-                    isUser: false,
-                    x: initialNodeRef.current.x,
-                    y: initialNodeRef.current.y + 200,
-                    parentId: initialNodeRef.current.id,
-                    childIds: [],
-                  };
-
-                  // Add the AI response as a child
-                  propsRef.current.onAddChild(initialNodeRef.current.id, initialNodeRef.current.x, initialNodeRef.current.y + 200, aiResponse);
-                  setStreamingResponse(null);
                   break;
                 }
               } catch (e) {
@@ -203,21 +267,12 @@ export default function ChatNodeComponent({
       console.error("Failed to get AI response:", error);
       const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
 
-      // Create error response node
-      const errorResponse: ChatNode = {
-        id: `node-${Date.now()}-error`,
+      // Update the AI response node with error content
+      propsRef.current.onUpdateNode(aiResponseId, {
         content: `Error: ${errorMessage}`,
-        isUser: false,
-        x: initialNodeRef.current.x,
-        y: initialNodeRef.current.y + 200,
-        parentId: initialNodeRef.current.id,
-        childIds: [],
-      };
-
-      propsRef.current.onAddChild(initialNodeRef.current.id, initialNodeRef.current.x, initialNodeRef.current.y + 200, errorResponse);
+      });
     } finally {
       setIsLoading(false);
-      setStreamingResponse(null);
     }
   };
 
@@ -225,7 +280,7 @@ export default function ChatNodeComponent({
     const shouldSkipConfirm = localStorage.getItem("skipDeleteConfirm") === "true";
 
     if (shouldSkipConfirm) {
-      propsRef.current.onDeleteNode(initialNodeRef.current.id);
+      propsRef.current.onDeleteNode(node.id);
     } else {
       setShowDeleteConfirm(true);
     }
@@ -235,12 +290,18 @@ export default function ChatNodeComponent({
     if (dontAskAgain) {
       localStorage.setItem("skipDeleteConfirm", "true");
     }
-    propsRef.current.onDeleteNode(initialNodeRef.current.id);
+    propsRef.current.onDeleteNode(node.id);
     setShowDeleteConfirm(false);
   };
 
   const handleAddChild = () => {
-    propsRef.current.onAddChild(initialNodeRef.current.id, initialNodeRef.current.x, initialNodeRef.current.y + 150);
+    // Calculate dynamic position for child node based on current card height
+    const cardHeight = calculateCardHeight();
+
+    // Add more spacing between cards to prevent overlap (60px)
+    const childY = node.y + cardHeight + 60;
+
+    propsRef.current.onAddChild(node.id, node.x, childY);
   };
 
   const handleTextSelect = () => {
@@ -248,48 +309,84 @@ export default function ChatNodeComponent({
     if (selection && selection.toString().trim()) {
       const range = selection.getRangeAt(0);
       const rect = range.getBoundingClientRect();
-      propsRef.current.onTextSelection(initialNodeRef.current.id, selection.toString(), rect.right, rect.top);
+      propsRef.current.onTextSelection(node.id, selection.toString(), rect.right, rect.top);
     }
   };
 
+  // D3-style drag handling with improved momentum
+  const handleMouseDown = (e: React.MouseEvent) => {
+    // Only start dragging if clicking on the card or header, not on interactive elements
+    const target = e.target as HTMLElement;
+    if (target.closest('button') || target.closest('textarea') || target.closest('select') || target.closest('[data-interactive="true"]')) {
+      return;
+    }
+
+    console.log('Starting drag for node:', node.id, 'at position:', { x: node.x, y: node.y });
+    setIsDragging(true);
+    // Store the initial mouse position relative to the node
+    setDragStart({
+      x: e.clientX,
+      y: e.clientY
+    });
+    setDragOffset({ x: 0, y: 0 });
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  // Global mouse events for dragging (similar to D3 drag behavior)
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const handleGlobalMouseMove = (e: MouseEvent) => {
+      // Calculate offset from the initial drag start position
+      const newOffset = {
+        x: e.clientX - dragStart.x,
+        y: e.clientY - dragStart.y
+      };
+      setDragOffset(newOffset);
+    };
+
+    const handleGlobalMouseUp = () => {
+      if (isDragging) {
+        setIsDragging(false);
+        const newX = node.x + dragOffset.x;
+        const newY = node.y + dragOffset.y;
+        console.log('Ending drag for node:', node.id, 'new position:', { newX, newY }, 'offset:', dragOffset);
+        propsRef.current.onMoveNode(node.id, newX, newY);
+        setDragOffset({ x: 0, y: 0 });
+      }
+    };
+
+    document.addEventListener('mousemove', handleGlobalMouseMove);
+    document.addEventListener('mouseup', handleGlobalMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleGlobalMouseMove);
+      document.removeEventListener('mouseup', handleGlobalMouseUp);
+    };
+  }, [isDragging, dragStart, dragOffset, node.x, node.y, node.id]);
+
   return (
     <>
-      <motion.div
-        drag
-        dragMomentum={false}
-        dragElastic={0.1}
-        dragConstraints={false}
-        onDragEnd={(event, info) => {
-          const newX = initialNodeRef.current.x + info.offset.x;
-          const newY = initialNodeRef.current.y + info.offset.y;
-          propsRef.current.onMoveNode(initialNodeRef.current.id, newX, newY);
-        }}
-        initial={{ x: 0, y: 0 }}
-        animate={{ x: 0, y: 0 }}
-        whileDrag={{
-          scale: 0.95,
-          rotate: 2,
-          zIndex: 1000,
-          boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)"
-        }}
-        transition={{
-          type: "spring",
-          stiffness: 500,
-          damping: 30
+      <div
+        data-node="true"
+        className="absolute"
+        style={{
+          left: node.x + dragOffset.x,
+          top: node.y + dragOffset.y,
+          transform: `scale(${Math.max(0.5, Math.min(1, 1 / zoom))})`,
+          transformOrigin: "top left",
+          zIndex: isDragging ? 1000 : 20,
         }}
       >
         <Card
-          data-node="true"
-          className={`absolute min-w-80 max-w-96 transition-all duration-200 ${initialNodeRef.current.isUser ? "border-blue-200" : "border-green-200"
-            } ${isHovered ? "shadow-lg scale-105" : "shadow-md"} cursor-grab z-20`}
-          style={{
-            left: initialNodeRef.current.x,
-            top: initialNodeRef.current.y,
-            transform: `scale(${Math.max(0.5, Math.min(1, 1 / zoom))})`,
-            transformOrigin: "top left",
-          }}
+          ref={cardRef}
+          className={`chat-node-card min-w-80 max-w-96 transition-all duration-200 ${node.isUser ? "border-blue-200" : "border-green-200"
+            } ${isHovered ? "shadow-lg scale-105" : "shadow-md"} ${isDragging ? "shadow-2xl ring-2 ring-blue-400 ring-opacity-50 scale-95" : ""
+            } cursor-grab active:cursor-grabbing select-none`}
           onMouseEnter={() => setIsHovered(true)}
           onMouseLeave={() => setIsHovered(false)}
+          onMouseDown={handleMouseDown}
         >
           <CardContent className="p-4 relative">
             {isHovered && (
@@ -298,7 +395,7 @@ export default function ChatNodeComponent({
                   size="icon"
                   variant="outline"
                   className="w-6 h-6"
-                  onClick={() => propsRef.current.onBranch(initialNodeRef.current.id)}
+                  onClick={() => propsRef.current.onBranch(node.id)} // Use current node prop
                   title="Branch conversation"
                 >
                   <GitBranch className="w-3 h-3" />
@@ -315,14 +412,14 @@ export default function ChatNodeComponent({
               </div>
             )}
 
-            <div className={`text-xs mb-2 ${initialNodeRef.current.isUser ? "text-blue-600" : "text-green-600"}`}>
-              {initialNodeRef.current.isUser ? "You" : "AI"}
+            <div className={`text-xs mb-2 ${node.isUser ? "text-blue-600" : "text-green-600"}`}>
+              {node.isUser ? "You" : "AI"}
             </div>
 
-            {!initialNodeRef.current.isUser && initialNodeRef.current.thinking && (
+            {!node.isUser && node.thinking && (
               <ThinkingIndicator
-                thinking={initialNodeRef.current.thinking}
-                thinkingTime={initialNodeRef.current.thinkingTime}
+                thinking={node.thinking}
+                thinkingTime={node.thinkingTime}
                 isThinking={false}
               />
             )}
@@ -343,8 +440,8 @@ export default function ChatNodeComponent({
                   onChange={(e) => setLocalContent(e.target.value)}
                   onBlur={() => {
                     // Only sync content when losing focus if content changed
-                    if (localContent !== initialNodeRef.current.content) {
-                      propsRef.current.onUpdateNode(initialNodeRef.current.id, { content: localContent });
+                    if (localContent !== node.content) {
+                      propsRef.current.onUpdateNode(node.id, { content: localContent });
                     }
                   }}
                   placeholder="Type your message..."
@@ -379,32 +476,20 @@ export default function ChatNodeComponent({
                 </div>
               </div>
             ) : (
-              <>
-                {streamingResponse && !streamingResponse.isComplete && (
-                  <div className="mb-2">
-                    <div className="text-sm text-muted-foreground mb-1">
-                      {streamingResponse.isThinking ? "Thinking..." : "Responding..."}
-                    </div>
-                    <div className="whitespace-pre-wrap">
-                      {streamingResponse.content}
-                      {!streamingResponse.isThinking && (
-                        <span className="inline-block w-2 h-4 bg-primary ml-1 animate-pulse" />
-                      )}
-                    </div>
-                  </div>
+              <div
+                ref={contentRef}
+                className="whitespace-pre-wrap select-text cursor-text"
+                onMouseUp={handleTextSelect}
+              >
+                {localContent}
+                {/* Show streaming cursor for AI nodes with empty content (likely streaming) */}
+                {!node.isUser && !localContent.trim() && (
+                  <span className="inline-block w-2 h-4 bg-primary ml-1 animate-pulse" />
                 )}
-
-                <div
-                  ref={contentRef}
-                  className="whitespace-pre-wrap select-text cursor-text"
-                  onMouseUp={handleTextSelect}
-                >
-                  {localContent}
-                </div>
-              </>
+              </div>
             )}
 
-            {isHovered && !isLocalEditing && (
+            {isHovered && !isLocalEditing && !node.isUser && (
               <Button
                 size="sm"
                 variant="ghost"
@@ -417,7 +502,7 @@ export default function ChatNodeComponent({
             )}
           </CardContent>
         </Card>
-      </motion.div>
+      </div>
 
       {showDeleteConfirm && (
         <div className="fixed inset-0 bg-background/80 flex items-center justify-center z-50">

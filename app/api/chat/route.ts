@@ -61,6 +61,8 @@ export async function POST(req: NextRequest) {
       content: message,
     });
 
+    console.log('Final messages array being sent to AI:', messages);
+
     // Create streaming response
     const encoder = new TextEncoder();
     const stream = new ReadableStream({

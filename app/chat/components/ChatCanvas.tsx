@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
+import * as d3 from "d3";
 import { ChatConversation, ChatNode } from "../page";
 import ChatNodeComponent from "./ChatNode";
 import { getLastUsedProviderAndModel, getUserPreferences } from "@/lib/storage";
@@ -12,6 +13,25 @@ interface ChatCanvasProps {
     x: number;
     y: number;
   }) => void;
+}
+
+// D3 Force Simulation types
+interface SimulationNode extends d3.SimulationNodeDatum {
+  id: string;
+  isUser: boolean;
+  content: string;
+  childIds: string[];
+  parentId?: string;
+  isEditing?: boolean;
+  thinking?: string;
+  thinkingTime?: number;
+  fx?: number | null; // Fixed position
+  fy?: number | null; // Fixed position
+}
+
+interface SimulationLink extends d3.SimulationLinkDatum<SimulationNode> {
+  source: string | SimulationNode;
+  target: string | SimulationNode;
 }
 
 export default function ChatCanvas({
@@ -31,6 +51,11 @@ export default function ChatCanvas({
     y: number;
   } | null>(null);
 
+  // D3 Force Simulation
+  const simulationRef = useRef<d3.Simulation<SimulationNode, SimulationLink> | null>(null);
+  const nodesRef = useRef<SimulationNode[]>([]);
+  const linksRef = useRef<SimulationLink[]>([]);
+
   // Use ref to avoid recreating callbacks when conversation changes
   const conversationRef = useRef<ChatConversation | null>(conversation);
   const onUpdateConversationRef = useRef(onUpdateConversation);
@@ -40,6 +65,112 @@ export default function ChatCanvas({
     conversationRef.current = conversation;
     onUpdateConversationRef.current = onUpdateConversation;
   }, [conversation, onUpdateConversation]);
+
+  // Convert ChatNode to SimulationNode
+  const chatNodeToSimulationNode = useCallback((node: ChatNode): SimulationNode => ({
+    id: node.id,
+    x: node.x,
+    y: node.y,
+    isUser: node.isUser,
+    content: node.content,
+    childIds: node.childIds,
+    parentId: node.parentId,
+    isEditing: node.isEditing,
+    thinking: node.thinking,
+    thinkingTime: node.thinkingTime,
+    fx: null, // Allow movement by default
+    fy: null, // Allow movement by default
+  }), []);
+
+  // Create links from parent-child relationships
+  const createLinks = useCallback((nodes: ChatNode[]): SimulationLink[] => {
+    const links: SimulationLink[] = [];
+    nodes.forEach(node => {
+      node.childIds.forEach(childId => {
+        links.push({
+          source: node.id,
+          target: childId,
+        });
+      });
+    });
+    return links;
+  }, []);
+
+  // Initialize or update force simulation
+  const updateForceSimulation = useCallback(() => {
+    if (!conversation || conversation.nodes.length === 0) {
+      return;
+    }
+
+    // Convert nodes and create links
+    const simNodes = conversation.nodes.map(chatNodeToSimulationNode);
+    const simLinks = createLinks(conversation.nodes);
+
+    nodesRef.current = simNodes;
+    linksRef.current = simLinks;
+
+    // Stop existing simulation
+    if (simulationRef.current) {
+      simulationRef.current.stop();
+    }
+
+    // Create new simulation with improved settings
+    const simulation = d3.forceSimulation<SimulationNode>(simNodes)
+      .force("link", d3.forceLink<SimulationNode, SimulationLink>(simLinks)
+        .id(d => d.id)
+        .distance(250) // Increased distance between connected nodes
+        .strength(0.6) // Slightly stronger link force
+      )
+      .force("charge", d3.forceManyBody()
+        .strength(-400) // Stronger repulsion between nodes
+        .distanceMax(500) // Increased max distance for repulsion
+      )
+      .force("center", d3.forceCenter(0, 0)) // Center the graph
+      .force("collision", d3.forceCollide()
+        .radius(120) // Increased minimum distance between nodes
+        .strength(0.8) // Stronger collision force
+      )
+      .alphaDecay(0.015) // Even slower decay for smoother animation
+      .velocityDecay(0.5); // Increased friction for more stability
+
+    // Update node positions on each tick
+    simulation.on("tick", () => {
+      if (!conversationRef.current) return;
+
+      const updatedNodes = conversationRef.current.nodes.map(node => {
+        const simNode = simNodes.find(n => n.id === node.id);
+        if (simNode && simNode.x !== undefined && simNode.y !== undefined) {
+          return {
+            ...node,
+            x: simNode.x,
+            y: simNode.y,
+          };
+        }
+        return node;
+      });
+
+      onUpdateConversationRef.current({
+        ...conversationRef.current,
+        nodes: updatedNodes,
+      });
+    });
+
+    simulationRef.current = simulation;
+  }, [conversation, chatNodeToSimulationNode, createLinks]);
+
+  // Update simulation when conversation changes
+  useEffect(() => {
+    updateForceSimulation();
+  }, [conversation?.nodes, updateForceSimulation]);
+
+  // Cleanup simulation on unmount
+  useEffect(() => {
+    return () => {
+      if (simulationRef.current) {
+        simulationRef.current.stop();
+      }
+    };
+  }, []);
 
   const handleCanvasDoubleClick = useCallback(
     (e: React.MouseEvent) => {
@@ -212,12 +343,23 @@ export default function ChatCanvas({
         });
       } else {
         // Create a new user input node
+        // If force simulation is enabled, position near parent but let simulation handle final positioning
+        const parentNode = currentConversation.nodes.find(n => n.id === parentId);
+        let nodeX = x;
+        let nodeY = y;
+
+        if (parentNode) {
+          // Position slightly offset from parent, simulation will adjust
+          nodeX = parentNode.x + 50;
+          nodeY = parentNode.y + 150;
+        }
+
         const newNode: ChatNode = {
           id: `node-${Date.now()}`,
           content: "",
           isUser: true,
-          x,
-          y,
+          x: nodeX,
+          y: nodeY,
           parentId,
           childIds: [],
           isEditing: true,
@@ -235,7 +377,7 @@ export default function ChatCanvas({
         });
       }
     },
-    [], // No dependencies - uses refs
+    [], // Add dependency on force simulation state
   );
 
   const branchNode = useCallback(
@@ -304,6 +446,19 @@ export default function ChatCanvas({
 
       console.log('Moving node:', { nodeId, x, y });
 
+      // Update the force simulation node if simulation is enabled
+      if (simulationRef.current) {
+        const simNode = nodesRef.current.find(n => n.id === nodeId);
+        if (simNode) {
+          // Do not fix the node position; allow simulation to continue
+          simNode.x = x;
+          simNode.y = y;
+
+          // Restart simulation with a low alpha to settle other nodes
+          simulationRef.current.alpha(0.1).restart();
+        }
+      }
+
       const updatedNodes = currentConversation.nodes.map((node) =>
         node.id === nodeId ? { ...node, x, y } : node,
       );
@@ -315,7 +470,7 @@ export default function ChatCanvas({
         nodes: updatedNodes,
       });
     },
-    [], // No dependencies - uses refs
+    [], // Add dependency on force simulation state
   );
 
   const handleNodeClick = useCallback(
@@ -323,6 +478,15 @@ export default function ChatCanvas({
       // Connection mode functionality removed
     },
     [],
+  );
+
+  const getNodeById = useCallback(
+    (id: string) => {
+      const currentConversation = conversationRef.current;
+      if (!currentConversation) return undefined;
+      return currentConversation.nodes.find((node) => node.id === id);
+    },
+    [], // No dependencies - uses refs
   );
 
   const handleReplyToSelection = useCallback(() => {
@@ -382,34 +546,50 @@ export default function ChatCanvas({
                 onTextSelection={handleTextSelection}
                 onMoveNode={moveNode}
                 onNodeClick={handleNodeClick}
+                getNodeById={getNodeById}
                 zoom={zoom}
               />
             ))}
 
-            {conversation.nodes.map((node) =>
-              node.childIds.map((childId) => {
-                const childNode = conversation.nodes.find(
-                  (n) => n.id === childId,
-                );
-                if (!childNode) return null;
+            {/* Render connections using force simulation data when available */}
+            {linksRef.current.length > 0
+              ? linksRef.current.map((link, index) => {
+                const sourceNode = typeof link.source === 'string'
+                  ? nodesRef.current.find(n => n.id === link.source)
+                  : link.source;
+                const targetNode = typeof link.target === 'string'
+                  ? nodesRef.current.find(n => n.id === link.target)
+                  : link.target;
+
+                if (!sourceNode || !targetNode ||
+                  sourceNode.x === undefined || sourceNode.y === undefined ||
+                  targetNode.x === undefined || targetNode.y === undefined) {
+                  return null;
+                }
 
                 const isHighlighted = false;
+                const nodeWidth = 384;
+                const nodeHeight = 120;
 
-                // Calculate connection points (center bottom of parent to center top of child)
-                const parentCenterX = node.x + 192; // Assuming node width is ~384px (min-w-96)
-                const parentBottomY = node.y + 120; // Assuming approximate node height
-                const childCenterX = childNode.x + 192;
-                const childTopY = childNode.y;
+                const sourceCenterX = sourceNode.x + nodeWidth / 2;
+                const sourceBottomY = sourceNode.y + nodeHeight + 10;
+                const targetCenterX = targetNode.x + nodeWidth / 2;
+                const targetTopY = targetNode.y - 10;
 
-                // Calculate SVG container bounds
-                const minX = Math.min(parentCenterX, childCenterX) - 50;
-                const minY = Math.min(parentBottomY, childTopY) - 50;
-                const maxX = Math.max(parentCenterX, childCenterX) + 50;
-                const maxY = Math.max(parentBottomY, childTopY) + 50;
+                const minX = Math.min(sourceCenterX, targetCenterX) - 60;
+                const minY = Math.min(sourceBottomY, targetTopY) - 20;
+                const maxX = Math.max(sourceCenterX, targetCenterX) + 60;
+                const maxY = Math.max(sourceBottomY, targetTopY) + 20;
+
+                const midY = (sourceBottomY + targetTopY) / 2;
+                const pathData = `M ${sourceCenterX - minX} ${sourceBottomY - minY} 
+                                   C ${sourceCenterX - minX} ${midY - minY} 
+                                     ${targetCenterX - minX} ${midY - minY} 
+                                     ${targetCenterX - minX} ${targetTopY - minY}`;
 
                 return (
                   <svg
-                    key={`edge-${node.id}-${childId}`}
+                    key={`force-edge-${index}`}
                     className="absolute pointer-events-none z-10"
                     style={{
                       left: minX,
@@ -420,33 +600,98 @@ export default function ChatCanvas({
                   >
                     <defs>
                       <marker
-                        id={`arrowhead-${node.id}-${childId}`}
+                        id={`force-arrowhead-${index}`}
                         markerWidth="10"
                         markerHeight="7"
                         refX="9"
                         refY="3.5"
                         orient="auto"
+                        markerUnits="strokeWidth"
                       >
                         <polygon
                           points="0 0, 10 3.5, 0 7"
-                          fill={isHighlighted ? "rgba(59, 130, 246, 0.8)" : "rgba(100, 116, 139, 0.7)"}
+                          fill="rgba(59, 130, 246, 0.8)"
                         />
                       </marker>
                     </defs>
-                    <line
-                      x1={parentCenterX - minX}
-                      y1={parentBottomY - minY}
-                      x2={childCenterX - minX}
-                      y2={childTopY - minY}
-                      stroke={isHighlighted ? "rgba(59, 130, 246, 0.8)" : "rgba(100, 116, 139, 0.7)"}
-                      strokeWidth={isHighlighted ? "3" : "2"}
-                      markerEnd={`url(#arrowhead-${node.id}-${childId})`}
+                    <path
+                      d={pathData}
+                      stroke="rgba(59, 130, 246, 0.8)"
+                      strokeWidth="3"
+                      fill="none"
+                      markerEnd={`url(#force-arrowhead-${index})`}
                       className="transition-all duration-200"
                     />
                   </svg>
                 );
-              }),
-            )}
+              })
+              : conversation.nodes.map((node) =>
+                node.childIds.map((childId) => {
+                  const childNode = conversation.nodes.find(
+                    (n) => n.id === childId,
+                  );
+                  if (!childNode) return null;
+
+                  const isHighlighted = false;
+                  const nodeWidth = 384;
+                  const nodeHeight = 120;
+
+                  const parentCenterX = node.x + nodeWidth / 2;
+                  const parentBottomY = node.y + nodeHeight + 10;
+                  const childCenterX = childNode.x + nodeWidth / 2;
+                  const childTopY = childNode.y - 10;
+
+                  const minX = Math.min(parentCenterX, childCenterX) - 60;
+                  const minY = Math.min(parentBottomY, childTopY) - 20;
+                  const maxX = Math.max(parentCenterX, childCenterX) + 60;
+                  const maxY = Math.max(parentBottomY, childTopY) + 20;
+
+                  const midY = (parentBottomY + childTopY) / 2;
+                  const pathData = `M ${parentCenterX - minX} ${parentBottomY - minY} 
+                                     C ${parentCenterX - minX} ${midY - minY} 
+                                       ${childCenterX - minX} ${midY - minY} 
+                                       ${childCenterX - minX} ${childTopY - minY}`;
+
+                  return (
+                    <svg
+                      key={`edge-${node.id}-${childId}`}
+                      className="absolute pointer-events-none z-10"
+                      style={{
+                        left: minX,
+                        top: minY,
+                        width: maxX - minX,
+                        height: maxY - minY,
+                      }}
+                    >
+                      <defs>
+                        <marker
+                          id={`arrowhead-${node.id}-${childId}`}
+                          markerWidth="10"
+                          markerHeight="7"
+                          refX="9"
+                          refY="3.5"
+                          orient="auto"
+                          markerUnits="strokeWidth"
+                        >
+                          <polygon
+                            points="0 0, 10 3.5, 0 7"
+                            fill={isHighlighted ? "rgba(59, 130, 246, 0.8)" : "rgba(100, 116, 139, 0.7)"}
+                          />
+                        </marker>
+                      </defs>
+                      <path
+                        d={pathData}
+                        stroke={isHighlighted ? "rgba(59, 130, 246, 0.8)" : "rgba(100, 116, 139, 0.7)"}
+                        strokeWidth={isHighlighted ? "3" : "2"}
+                        fill="none"
+                        markerEnd={`url(#arrowhead-${node.id}-${childId})`}
+                        className="transition-all duration-200"
+                      />
+                    </svg>
+                  );
+                }),
+              )
+            }
           </>
         )}
       </div>
