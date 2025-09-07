@@ -239,8 +239,8 @@ export default function ChatPage() {
         await initializeDefaultProviders();
 
         const configs = await fetchProviderConfigs();
-        const hasConfiguredApiKeys = configs.some(c => c.apiKey);
-        if (!hasConfiguredApiKeys) {
+        // Show setup dialog if no providers are configured
+        if (configs.length === 0) {
           setIsSetupDialogOpen(true);
         }
 

@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ArrowLeft, CheckCircle } from "lucide-react";
 import { AIProvider, ProviderConfig, DEFAULT_PROVIDER_CONFIGS } from "@/lib/types";
-import { putProviderConfig } from "@/lib/storage";
+import { putProviderConfig, getAllProviderConfigs } from "@/lib/storage";
 
 interface ProviderSetupDialogProps {
     isOpen: boolean;
@@ -97,16 +97,36 @@ export default function ProviderSetupDialog({
         setIsConfiguring(true);
 
         try {
-            const defaultConfig = DEFAULT_PROVIDER_CONFIGS[selectedProvider];
-            const newConfig: ProviderConfig = {
-                ...defaultConfig,
-                id: `${selectedProvider}_${Date.now()}`,
-                apiKey: apiKey || undefined,
-                baseUrl: baseUrl || defaultConfig.baseUrl,
-                isDefault: true,
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-            };
+            // Check if a provider of this type already exists
+            const existingConfigs = await getAllProviderConfigs();
+            const existingProvider = existingConfigs.find(config => config.provider === selectedProvider);
+
+            const defaultConfig = DEFAULT_PROVIDER_CONFIGS[selectedProvider as AIProvider];
+            const now = new Date().toISOString();
+
+            let newConfig: ProviderConfig;
+
+            if (existingProvider) {
+                // Update the existing provider instead of creating a new one
+                newConfig = {
+                    ...existingProvider,
+                    apiKey: apiKey || undefined,
+                    baseUrl: baseUrl || defaultConfig.baseUrl,
+                    isDefault: true,
+                    updatedAt: now,
+                };
+            } else {
+                // Create a new provider config
+                newConfig = {
+                    ...defaultConfig,
+                    id: `${selectedProvider}_${Date.now()}`,
+                    apiKey: apiKey || undefined,
+                    baseUrl: baseUrl || defaultConfig.baseUrl,
+                    isDefault: true,
+                    createdAt: now,
+                    updatedAt: now,
+                };
+            }
 
             await putProviderConfig(newConfig);
             onProviderConfigured();
@@ -188,7 +208,7 @@ export default function ProviderSetupDialog({
                                 id="api-key"
                                 type="password"
                                 value={apiKey}
-                                onChange={(e) => setApiKey(e.target.value)}
+                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setApiKey(e.target.value)}
                                 placeholder={selectedProviderConfig.placeholder}
                             />
                             <p className="text-xs text-muted-foreground">
@@ -203,7 +223,7 @@ export default function ProviderSetupDialog({
                             <Input
                                 id="base-url"
                                 value={baseUrl}
-                                onChange={(e) => setBaseUrl(e.target.value)}
+                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setBaseUrl(e.target.value)}
                                 placeholder={selectedProviderConfig.defaultUrl}
                             />
                             <p className="text-xs text-muted-foreground">

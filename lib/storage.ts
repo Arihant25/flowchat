@@ -285,7 +285,7 @@ export function saveCachedModels(provider: AIProvider, models: ModelInfo[]): voi
     }
 }
 
-// Initialize default provider configurations
+// Initialize default provider configurations (only create empty placeholders)
 export async function initializeDefaultProviders(): Promise<void> {
     if (typeof window === "undefined") {
         // Server-side: nothing to initialize
@@ -294,22 +294,12 @@ export async function initializeDefaultProviders(): Promise<void> {
 
     try {
         const existingConfigs = await getAllProviderConfigs();
-        const now = new Date().toISOString();
 
-        const providersToEnsure: AIProvider[] = ["ollama", "lmstudio"];
-
-        for (const providerType of providersToEnsure) {
-            const hasProvider = existingConfigs.some(c => c.provider === providerType);
-            if (!hasProvider) {
-                const defaultConfig = DEFAULT_PROVIDER_CONFIGS[providerType];
-                const config: ProviderConfig = {
-                    ...defaultConfig,
-                    id: `${providerType}_default`,
-                    createdAt: now,
-                    updatedAt: now,
-                };
-                await putProviderConfig(config);
-            }
+        // Only ensure we have minimal setup, don't create actual provider configs
+        // The setup dialog will handle creating them when users actually configure providers
+        if (existingConfigs.length === 0) {
+            // We don't create any providers here anymore
+            // They will be created through the setup dialog
         }
     } catch (error) {
         console.error("Error initializing default providers:", error);
