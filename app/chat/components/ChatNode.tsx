@@ -10,6 +10,7 @@ import ProviderModelSelector from "@/components/ui/provider-model-selector";
 import ThinkingIndicator from "@/components/ui/thinking-indicator";
 import { getUserPreferences, saveLastUsedProviderAndModel, getLastUsedProviderAndModel, getAllProviderConfigs } from "@/lib/storage";
 import { ChatMessage, StreamingResponse, ProviderConfig } from "@/lib/types";
+import { getModelBorderColor, USER_NODE_BORDER, DEFAULT_AI_NODE_BORDER } from "@/lib/utils";
 
 interface ChatNodeComponentProps {
   node: ChatNode;
@@ -71,6 +72,26 @@ export default function ChatNodeComponent({
   }, [node.content, node.isEditing]);
 
   propsRef.current = { onUpdateNode, onDeleteNode, onAddChild, onBranch, onTextSelection, onMoveNode, onNodeClick };
+
+  // Get user preferences for color coding
+  const userPreferences = getUserPreferences();
+  const colorCodeNodes = userPreferences.colorCodeNodes;
+
+  // Determine node border color based on preferences and model
+  const getNodeBorderColor = () => {
+    if (node.isUser) {
+      return USER_NODE_BORDER;
+    } else {
+      // AI node
+      if (colorCodeNodes && node.model) {
+        return getModelBorderColor(node.model);
+      } else {
+        return DEFAULT_AI_NODE_BORDER;
+      }
+    }
+  };
+
+  const nodeBorderColor = getNodeBorderColor();
 
   useEffect(() => {
     if (isLocalEditing && textareaRef.current) {
@@ -183,6 +204,8 @@ export default function ChatNodeComponent({
       y: responseY,
       parentId: node.id,
       childIds: [],
+      model: selectedModel, // Store the model used for this response
+      providerId: selectedProviderId, // Store the provider used for this response
     };
 
     // Add the AI response node immediately
@@ -392,8 +415,7 @@ export default function ChatNodeComponent({
       >
         <Card
           ref={cardRef}
-          className={`chat-node-card min-w-80 max-w-96 transition-all duration-200 ${node.isUser ? "border-blue-200" : "border-green-200"
-            } ${isHovered ? "shadow-lg scale-105" : "shadow-md"} ${isDragging ? "shadow-2xl ring-2 ring-blue-400 ring-opacity-50 scale-95" : ""
+          className={`chat-node-card min-w-80 max-w-96 transition-all duration-200 border-2 ${nodeBorderColor} ${isHovered ? "shadow-lg scale-105" : "shadow-md"} ${isDragging ? "shadow-2xl ring-2 ring-blue-400 ring-opacity-50 scale-95" : ""
             } cursor-grab active:cursor-grabbing select-none`}
           onMouseEnter={() => setIsHovered(true)}
           onMouseLeave={() => setIsHovered(false)}
@@ -423,8 +445,8 @@ export default function ChatNodeComponent({
               </div>
             )}
 
-            <div className={`text-xs mb-2 ${node.isUser ? "text-blue-600" : "text-green-600"}`}>
-              {node.isUser ? "You" : "AI"}
+            <div className="text-xs mb-2 text-muted-foreground">
+              {node.isUser ? "You" : `${colorCodeNodes && node.model ? ` ${node.model}` : ""}`}
             </div>
 
             {!node.isUser && node.thinking && (

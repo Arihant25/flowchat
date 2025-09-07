@@ -24,6 +24,8 @@ export interface ChatNode {
   isEditing?: boolean;
   thinking?: string;
   thinkingTime?: number;
+  model?: string; // Track which model was used for AI responses
+  providerId?: string; // Track which provider was used for AI responses
 }
 
 export interface ChatConversation {

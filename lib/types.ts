@@ -129,6 +129,7 @@ export interface UserPreferences {
     theme: "light" | "dark" | "system";
     lastUsedProvider: string; // Last used provider config ID
     lastUsedModel: string; // Last used model ID
+    colorCodeNodes: boolean; // Enable color coding of nodes based on model
 }
 
 export const DEFAULT_USER_PREFERENCES: UserPreferences = {
@@ -139,4 +140,5 @@ export const DEFAULT_USER_PREFERENCES: UserPreferences = {
     theme: "system",
     lastUsedProvider: "",
     lastUsedModel: "",
+    colorCodeNodes: true,
 };

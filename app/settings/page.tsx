@@ -389,6 +389,19 @@ export default function Settings() {
                       </SelectContent>
                     </Select>
                   </div>
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label htmlFor="color-code-nodes">Color Code Nodes</Label>
+                      <p className="text-sm text-muted-foreground">
+                        Color code AI nodes based on the model used for easy identification
+                      </p>
+                    </div>
+                    <Switch
+                      id="color-code-nodes"
+                      checked={userPreferences?.colorCodeNodes ?? false}
+                      onCheckedChange={(checked) => updateUserPreferences({ colorCodeNodes: checked })}
+                    />
+                  </div>
                 </CardContent>
               </Card>
 
