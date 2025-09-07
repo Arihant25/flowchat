@@ -8,8 +8,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Plus, X, GitBranch, Send } from "lucide-react";
 import ProviderModelSelector from "@/components/ui/provider-model-selector";
 import ThinkingIndicator from "@/components/ui/thinking-indicator";
-import { getUserPreferences, saveLastUsedProviderAndModel, getLastUsedProviderAndModel } from "@/lib/storage";
-import { ChatMessage, StreamingResponse } from "@/lib/types";
+import { getUserPreferences, saveLastUsedProviderAndModel, getLastUsedProviderAndModel, getAllProviderConfigs } from "@/lib/storage";
+import { ChatMessage, StreamingResponse, ProviderConfig } from "@/lib/types";
 
 interface ChatNodeComponentProps {
   node: ChatNode;
@@ -109,19 +109,22 @@ export default function ChatNodeComponent({
 
   const buildConversationHistory = (): ChatMessage[] => {
     const history: ChatMessage[] = [];
-    const conversationPath: ChatNode[] = [];
+    const allNodes: ChatNode[] = [];
 
-    // First, build the complete path from root to current node
+    // First, collect all nodes in the conversation path from current node back to root
     let currentNode: ChatNode | undefined = node;
     while (currentNode) {
-      conversationPath.unshift(currentNode); // Add to beginning to get root-to-current order
+      allNodes.push(currentNode);
       currentNode = currentNode.parentId ? getNodeById(currentNode.parentId) : undefined;
     }
 
-    // Now convert the path to messages, excluding the current node since it will be added separately
-    for (let i = 0; i < conversationPath.length - 1; i++) {
-      const pathNode = conversationPath[i];
-      // Include all nodes with content (both user prompts and AI responses)
+    // Reverse to get root-to-current order
+    allNodes.reverse();
+
+    // Convert the path to messages, excluding the current node (last one) since it will be added separately
+    // Only include nodes that have content
+    for (let i = 0; i < allNodes.length - 1; i++) {
+      const pathNode = allNodes[i];
       if (pathNode.content.trim()) {
         const message: ChatMessage = {
           role: pathNode.isUser ? 'user' : 'assistant',
@@ -132,8 +135,8 @@ export default function ChatNodeComponent({
     }
 
     console.log('Built conversation path for node:', node.id);
-    console.log('Full conversation path:', conversationPath.map(n => ({ id: n.id, isUser: n.isUser, content: n.content.substring(0, 50) + '...' })));
-    console.log('Conversation history being sent:', history);
+    console.log('All nodes in path:', allNodes.map(n => ({ id: n.id, isUser: n.isUser, content: n.content.substring(0, 50) + '...' })));
+    console.log('Final conversation history being sent:', history);
     return history;
   };
 
@@ -187,6 +190,15 @@ export default function ChatNodeComponent({
 
     try {
       const preferences = getUserPreferences();
+
+      // Get the full provider configuration from client-side storage (includes API key)
+      const providerConfigs = await getAllProviderConfigs();
+      const providerConfig = providerConfigs.find(c => c.id === selectedProviderId);
+
+      if (!providerConfig) {
+        throw new Error("Provider configuration not found");
+      }
+
       const requestBody = {
         message: localContent,
         conversationHistory: buildConversationHistory(),
@@ -195,6 +207,7 @@ export default function ChatNodeComponent({
         providerId: selectedProviderId,
         temperature: preferences.temperature || 0.7,
         systemPrompt: preferences.systemPrompt || "",
+        providerConfig: providerConfig, // Send the full config including API key
       };
 
       const response = await fetch("/api/chat", {

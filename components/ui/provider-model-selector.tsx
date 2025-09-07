@@ -4,7 +4,9 @@ import { useState, useEffect, useCallback, useRef, memo } from "react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { RefreshCw, Settings } from "lucide-react";
-import { ModelInfo } from "@/lib/types";
+import { ModelInfo, ProviderConfig } from "@/lib/types";
+import { getAllProviderConfigs } from "@/lib/storage";
+
 interface APIProviderConfig {
     id: string;
     name: string;
@@ -40,6 +42,7 @@ export default memo(function ProviderModelSelector({
     const [loadingModels, setLoadingModels] = useState(false);
     const [hasLoadedProviders, setHasLoadedProviders] = useState(false);
     const [hasInitialized, setHasInitialized] = useState(false);
+    const [fullProviderConfigs, setFullProviderConfigs] = useState<ProviderConfig[]>([]);
     const loadingModelsRef = useRef(false);
     const mounted = useRef(true);
 
@@ -49,17 +52,35 @@ export default memo(function ProviderModelSelector({
 
         try {
             setLoadingProviders(true);
+
+            // Load full provider configs from client-side storage (includes API keys)
+            const fullConfigs = await getAllProviderConfigs();
+            setFullProviderConfigs(fullConfigs);
+
+            // Also get provider info from server for hasApiKey status check
             const response = await fetch("/api/chat");
             if (!mounted.current) return;
 
             if (response.ok) {
                 const data = await response.json();
-                setProviders(data.providers || []);
+
+                // Merge server response with client configs to get hasApiKey status
+                const mergedProviders = fullConfigs.map(config => ({
+                    id: config.id,
+                    name: config.name,
+                    provider: config.provider,
+                    isDefault: config.isDefault,
+                    defaultModel: config.defaultModel,
+                    hasApiKey: !!config.apiKey,
+                    baseUrl: config.baseUrl,
+                }));
+
+                setProviders(mergedProviders);
                 setHasLoadedProviders(true);
 
                 // If no provider is selected, select the first default one (only if autoSelectDefault is true)
-                if (!selectedProviderId && data.providers?.length > 0 && autoSelectDefault) {
-                    const defaultProvider = data.providers.find((p: any) => p.isDefault) || data.providers[0];
+                if (!selectedProviderId && mergedProviders.length > 0 && autoSelectDefault) {
+                    const defaultProvider = mergedProviders.find(p => p.isDefault) || mergedProviders[0];
                     onProviderChange(defaultProvider.id);
                 }
             }
@@ -89,7 +110,27 @@ export default memo(function ProviderModelSelector({
                 }
             }
 
-            const response = await fetch(`/api/models?providerId=${providerId}&refresh=${refresh}`);
+            // Find the full provider config (with API key) from client-side storage
+            const providerConfig = fullProviderConfigs.find(c => c.id === providerId);
+
+            if (!providerConfig) {
+                console.error("Provider config not found for:", providerId);
+                return;
+            }
+
+            // Send provider config with API key to the server
+            const response = await fetch(`/api/models`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    providerId,
+                    refresh,
+                    providerConfig: providerConfig
+                })
+            });
+
             if (!mounted.current) return;
 
             if (response.ok) {

@@ -38,6 +38,7 @@ export interface ChatRequest {
     providerId: string;
     temperature?: number;
     systemPrompt?: string;
+    providerConfig?: ProviderConfig;
 }
 
 export interface StreamingResponse {

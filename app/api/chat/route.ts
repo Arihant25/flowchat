@@ -13,7 +13,8 @@ export async function POST(req: NextRequest) {
       model,
       providerId,
       temperature = 0.7,
-      systemPrompt
+      systemPrompt,
+      providerConfig
     } = body;
 
     if (!message || typeof message !== "string") {
@@ -31,8 +32,16 @@ export async function POST(req: NextRequest) {
     }
 
     // Get provider configuration
-    const configs = await getAllProviderConfigs();
-    const config = configs.find(c => c.id === providerId);
+    let config;
+
+    if (providerConfig) {
+      // Use the provider config sent from client (includes API keys)
+      config = providerConfig;
+    } else {
+      // Fallback to server-side configs (for backward compatibility)
+      const configs = await getAllProviderConfigs();
+      config = configs.find(c => c.id === providerId);
+    }
 
     if (!config) {
       return NextResponse.json(
