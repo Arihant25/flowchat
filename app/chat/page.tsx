@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect } from "react";
 import {
   getAllConversations,
   putConversation,
   deleteConversation as deleteStoredConversation,
+  getAllProviderConfigs,
   StoredConversation,
   initializeDefaultProviders,
 } from "@/lib/storage";
@@ -12,6 +13,8 @@ import ChatSidebar from "./components/ChatSidebar";
 import ChatCanvas from "./components/ChatCanvas";
 import { Button } from "@/components/ui/button";
 import { Maximize2, Minimize2 } from "lucide-react";
+import ProviderSetupDialog from "@/components/ui/provider-setup-dialog";
+import { ProviderConfig } from "@/lib/types";
 
 export interface ChatNode {
   id: string;
@@ -45,6 +48,40 @@ export default function ChatPage() {
     x: number;
     y: number;
   } | null>(null);
+  const [isSetupDialogOpen, setIsSetupDialogOpen] = useState(false);
+  const [providerConfigs, setProviderConfigs] = useState<ProviderConfig[]>([]);
+
+  const fetchProviderConfigs = async () => {
+    const configs = await getAllProviderConfigs();
+    setProviderConfigs(configs);
+    return configs;
+  };
+
+  const handleProviderConfigured = () => {
+    fetchProviderConfigs();
+  };
+
+  const toggleFullscreen = useCallback(async () => {
+    try {
+      if (!isFullscreen) {
+        await document.documentElement.requestFullscreen();
+      } else {
+        await document.exitFullscreen();
+      }
+    } catch (error) {
+      console.warn("Failed to toggle fullscreen:", error);
+    }
+  }, [isFullscreen]);
+
+  // Listen for fullscreen changes to update state
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
 
   const createNewConversation = useCallback(
     (initialNodePosition?: { x: number; y: number }) => {
@@ -166,6 +203,12 @@ export default function ChatPage() {
         // Initialize default providers first
         await initializeDefaultProviders();
 
+        const configs = await fetchProviderConfigs();
+        const hasConfiguredApiKeys = configs.some(c => c.apiKey);
+        if (!hasConfiguredApiKeys) {
+          setIsSetupDialogOpen(true);
+        }
+
         const stored = await getAllConversations();
         if (!mounted) return;
         // convert back to ChatConversation shape
@@ -222,7 +265,7 @@ export default function ChatPage() {
             variant="outline"
             size="icon"
             className="absolute top-4 right-4 z-10"
-            onClick={() => setIsFullscreen(!isFullscreen)}
+            onClick={toggleFullscreen}
           >
             {isFullscreen ? (
               <Minimize2 className="h-4 w-4" />
@@ -232,6 +275,11 @@ export default function ChatPage() {
           </Button>
         </div>
       </div>
+      <ProviderSetupDialog
+        isOpen={isSetupDialogOpen}
+        onClose={() => setIsSetupDialogOpen(false)}
+        onProviderConfigured={handleProviderConfigured}
+      />
     </div>
   );
 }

@@ -294,18 +294,20 @@ export async function initializeDefaultProviders(): Promise<void> {
 
     try {
         const existingConfigs = await getAllProviderConfigs();
+        const now = new Date().toISOString();
 
-        if (existingConfigs.length === 0) {
-            const now = new Date().toISOString();
+        const providersToEnsure: AIProvider[] = ["ollama", "lmstudio"];
 
-            for (const [providerType, defaultConfig] of Object.entries(DEFAULT_PROVIDER_CONFIGS)) {
+        for (const providerType of providersToEnsure) {
+            const hasProvider = existingConfigs.some(c => c.provider === providerType);
+            if (!hasProvider) {
+                const defaultConfig = DEFAULT_PROVIDER_CONFIGS[providerType];
                 const config: ProviderConfig = {
                     ...defaultConfig,
                     id: `${providerType}_default`,
                     createdAt: now,
                     updatedAt: now,
                 };
-
                 await putProviderConfig(config);
             }
         }

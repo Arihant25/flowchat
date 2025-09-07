@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Plus, X, GitBranch, Send } from "lucide-react";
 import ProviderModelSelector from "@/components/ui/provider-model-selector";
 import ThinkingIndicator from "@/components/ui/thinking-indicator";
+import MarkdownRenderer from "@/components/ui/markdown-renderer";
 import { getUserPreferences, saveLastUsedProviderAndModel, getLastUsedProviderAndModel, getAllProviderConfigs } from "@/lib/storage";
 import { ChatMessage, StreamingResponse, ProviderConfig } from "@/lib/types";
 import { getModelBorderColor, USER_NODE_BORDER, DEFAULT_AI_NODE_BORDER } from "@/lib/utils";
@@ -415,7 +416,7 @@ export default function ChatNodeComponent({
       >
         <Card
           ref={cardRef}
-          className={`chat-node-card min-w-80 max-w-96 transition-all duration-200 border-2 ${nodeBorderColor} ${isHovered ? "shadow-lg scale-105" : "shadow-md"} ${isDragging ? "shadow-2xl ring-2 ring-blue-400 ring-opacity-50 scale-95" : ""
+          className={`chat-node-card min-w-[32rem] max-w-[48rem] transition-all duration-200 border-2 ${nodeBorderColor} ${isHovered ? "shadow-lg scale-105" : "shadow-md"} ${isDragging ? "shadow-2xl ring-2 ring-blue-400 ring-opacity-50 scale-95" : ""
             } cursor-grab active:cursor-grabbing select-none`}
           onMouseEnter={() => setIsHovered(true)}
           onMouseLeave={() => setIsHovered(false)}
@@ -480,9 +481,11 @@ export default function ChatNodeComponent({
                   placeholder="Type your message..."
                   className="min-h-20 resize-none"
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" && e.ctrlKey) {
+                    if (e.key === "Enter" && !e.ctrlKey && !e.shiftKey) {
+                      e.preventDefault();
                       handleSubmit();
                     }
+                    // Ctrl+Enter or Shift+Enter will create a new line (default behavior)
                   }}
                 />
 
@@ -511,10 +514,13 @@ export default function ChatNodeComponent({
             ) : (
               <div
                 ref={contentRef}
-                className="whitespace-pre-wrap select-text cursor-text"
+                className="select-text cursor-text"
                 onMouseUp={handleTextSelect}
               >
-                {localContent}
+                <MarkdownRenderer
+                  content={localContent || ""}
+                  className="min-h-0"
+                />
                 {/* Show streaming cursor for AI nodes with empty content (likely streaming) */}
                 {!node.isUser && !localContent.trim() && (
                   <span className="inline-block w-2 h-4 bg-primary ml-1 animate-pulse" />
