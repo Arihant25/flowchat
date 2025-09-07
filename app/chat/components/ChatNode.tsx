@@ -5,6 +5,14 @@ import { ChatNode } from "../page";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Plus, X, GitBranch, Send, Copy, Check } from "lucide-react";
 import ProviderModelSelector from "@/components/ui/provider-model-selector";
 import ThinkingIndicator from "@/components/ui/thinking-indicator";
@@ -24,6 +32,8 @@ interface ChatNodeComponentProps {
   onNodeClick?: (nodeId: string, event: React.MouseEvent) => void;
   zoom: number;
   getNodeById: (id: string) => ChatNode | undefined;
+  isMarkedForDeletion?: boolean;
+  deletionDepth?: number;
 }
 
 export default function ChatNodeComponent({
@@ -37,6 +47,8 @@ export default function ChatNodeComponent({
   onNodeClick,
   zoom,
   getNodeById,
+  isMarkedForDeletion = false,
+  deletionDepth = 0,
 }: ChatNodeComponentProps) {
   const [localContent, setLocalContent] = useState(node.content);
   const [isLocalEditing, setIsLocalEditing] = useState(node.isEditing);
@@ -48,6 +60,7 @@ export default function ChatNodeComponent({
   const [selectedModel, setSelectedModel] = useState("");
   const [streamingResponse, setStreamingResponse] = useState<StreamingResponse | null>(null);
   const [copied, setCopied] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -72,6 +85,18 @@ export default function ChatNodeComponent({
     setLocalContent(node.content);
     setIsLocalEditing(node.isEditing ?? false);
   }, [node.content, node.isEditing]);
+
+  // Handle cascading deletion animation
+  useEffect(() => {
+    if (isMarkedForDeletion && !isDeleting) {
+      // Start deletion animation with delay based on depth
+      const delay = deletionDepth * 150; // 150ms delay per level
+
+      setTimeout(() => {
+        setIsDeleting(true);
+      }, delay);
+    }
+  }, [isMarkedForDeletion, isDeleting, deletionDepth]);
 
   propsRef.current = { onUpdateNode, onDeleteNode, onAddChild, onBranch, onTextSelection, onMoveNode, onNodeClick };
 
@@ -111,10 +136,17 @@ export default function ChatNodeComponent({
 
       const preferences = getUserPreferences();
       const lastUsed = getLastUsedProviderAndModel();
+      // Fetch currently configured provider configs to support single-provider auto selection
+      const providerConfigs = await getAllProviderConfigs();
 
       // For new nodes (editing), prefer last used settings, fall back to default
       if (node.isEditing) {
-        if (lastUsed.providerId && lastUsed.model) {
+        if (providerConfigs.length === 1) {
+          // Always choose the single configured provider, ignoring stale last-used/default
+          const only = providerConfigs[0];
+          setSelectedProviderId(only.id);
+          // Model will auto-select via ProviderModelSelector once models load (if defaultModel exists)
+        } else if (lastUsed.providerId && lastUsed.model) {
           setSelectedProviderId(lastUsed.providerId);
           setSelectedModel(lastUsed.model);
         } else if (preferences.defaultProvider) {
@@ -157,9 +189,6 @@ export default function ChatNodeComponent({
       }
     }
 
-    console.log('Built conversation path for node:', node.id);
-    console.log('All nodes in path:', allNodes.map(n => ({ id: n.id, isUser: n.isUser, content: n.content.substring(0, 50) + '...' })));
-    console.log('Final conversation history being sent:', history);
     return history;
   };
 
@@ -318,7 +347,12 @@ export default function ChatNodeComponent({
     const shouldSkipConfirm = localStorage.getItem("skipDeleteConfirm") === "true";
 
     if (shouldSkipConfirm) {
-      propsRef.current.onDeleteNode(node.id);
+      // Start the deletion animation
+      setIsDeleting(true);
+      // After animation completes, actually delete the node
+      setTimeout(() => {
+        propsRef.current.onDeleteNode(node.id);
+      }, 300); // Match animation duration
     } else {
       setShowDeleteConfirm(true);
     }
@@ -328,8 +362,13 @@ export default function ChatNodeComponent({
     if (dontAskAgain) {
       localStorage.setItem("skipDeleteConfirm", "true");
     }
-    propsRef.current.onDeleteNode(node.id);
     setShowDeleteConfirm(false);
+    // Start the deletion animation
+    setIsDeleting(true);
+    // After animation completes, actually delete the node
+    setTimeout(() => {
+      propsRef.current.onDeleteNode(node.id);
+    }, 300); // Match animation duration
   };
 
   const handleAddChild = () => {
@@ -424,10 +463,13 @@ export default function ChatNodeComponent({
       >
         <Card
           ref={cardRef}
-          className={`chat-node-card min-w-[32rem] max-w-[48rem] transition-all duration-200 border-2 ${nodeBorderColor} ${isHovered ? "shadow-lg scale-105" : "shadow-md"} ${isDragging ? "shadow-2xl ring-2 ring-blue-400 ring-opacity-50 scale-95" : ""} cursor-grab active:cursor-grabbing`}
+          className={`chat-node-card min-w-[32rem] max-w-[48rem] transition-all duration-200 border-2 ${nodeBorderColor} ${isHovered ? "shadow-lg" : "shadow-md"} ${isDragging ? "shadow-2xl ring-2 ring-blue-400 ring-opacity-50 scale-95" : ""} ${isDeleting ? "animate-pulse scale-110 opacity-30" : ""} cursor-grab active:cursor-grabbing`}
           onMouseEnter={() => setIsHovered(true)}
           onMouseLeave={() => setIsHovered(false)}
           onMouseDown={handleMouseDown}
+          style={{
+            animation: isDeleting ? "pop-out 0.3s ease-in-out" : undefined,
+          }}
         >
           <CardContent className="p-4 relative">
             {isHovered && (
@@ -492,7 +534,7 @@ export default function ChatNodeComponent({
             )}
 
             {isLocalEditing ? (
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <Textarea
                   ref={textareaRef}
                   value={localContent}
@@ -514,22 +556,22 @@ export default function ChatNodeComponent({
                   }}
                 />
 
-                {/* Provider and Model Selection */}
-                <ProviderModelSelector
-                  selectedProviderId={selectedProviderId}
-                  selectedModel={selectedModel}
-                  onProviderChange={setSelectedProviderId}
-                  onModelChange={setSelectedModel}
-                  className="mb-2"
-                  autoSelectDefault={false}
-                  preserveModelOnProviderChange={true}
-                />
-
-                <div className="flex justify-end gap-2">
+                {/* Provider and Model Selection with Send Button */}
+                <div className="flex items-center gap-3">
+                  <ProviderModelSelector
+                    selectedProviderId={selectedProviderId}
+                    selectedModel={selectedModel}
+                    onProviderChange={setSelectedProviderId}
+                    onModelChange={setSelectedModel}
+                    className="flex-1"
+                    autoSelectDefault={false}
+                    preserveModelOnProviderChange={true}
+                  />
                   <Button
                     size="sm"
                     onClick={handleSubmit}
                     disabled={!localContent.trim() || !selectedProviderId || !selectedModel || isLoading}
+                    className="shrink-0"
                   >
                     <Send className="w-3 h-3 mr-1" />
                     {isLoading ? "Sending..." : "Send"}
@@ -569,37 +611,35 @@ export default function ChatNodeComponent({
         </Card>
       </div>
 
-      {showDeleteConfirm && (
-        <div className="fixed inset-0 bg-background/80 flex items-center justify-center z-50">
-          <Card className="w-96">
-            <CardContent className="p-6">
-              <h3 className="text-lg font-semibold mb-4">Delete Node</h3>
-              <p className="text-muted-foreground mb-4">
-                Are you sure you want to delete this node and all its children? This action cannot be undone.
-              </p>
-              <div className="flex items-center space-x-2 mb-4">
-                <input
-                  type="checkbox"
-                  id="dontAskAgain"
-                  checked={dontAskAgain}
-                  onChange={(e) => setDontAskAgain(e.target.checked)}
-                />
-                <label htmlFor="dontAskAgain" className="text-sm">
-                  Don't ask me again
-                </label>
-              </div>
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={() => setShowDeleteConfirm(false)}>
-                  Cancel
-                </Button>
-                <Button variant="destructive" onClick={confirmDelete}>
-                  Delete
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+      <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Node</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete this node and all its children? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex items-center space-x-2 py-4">
+            <input
+              type="checkbox"
+              id="dontAskAgain"
+              checked={dontAskAgain}
+              onChange={(e) => setDontAskAgain(e.target.checked)}
+            />
+            <label htmlFor="dontAskAgain" className="text-sm">
+              Don't ask me again
+            </label>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowDeleteConfirm(false)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={confirmDelete}>
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

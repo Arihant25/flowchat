@@ -121,3 +121,30 @@
     @apply bg-background text-foreground;
   }
 }
+
+@keyframes pop-out {
+  0% {
+    transform: scale(1) rotate(0deg);
+    opacity: 1;
+  }
+
+  25% {
+    transform: scale(1.2) rotate(-1deg);
+    opacity: 0.9;
+  }
+
+  50% {
+    transform: scale(1.15) rotate(1deg);
+    opacity: 0.7;
+  }
+
+  75% {
+    transform: scale(0.9) rotate(-0.5deg);
+    opacity: 0.4;
+  }
+
+  100% {
+    transform: scale(0.3) rotate(0deg);
+    opacity: 0;
+  }
+}

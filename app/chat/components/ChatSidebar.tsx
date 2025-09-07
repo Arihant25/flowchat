@@ -50,8 +50,6 @@ export default function ChatSidebar({
       // Inform parent to update the conversation title
       if (typeof onRenameConversation === "function") {
         onRenameConversation(editingId, editingTitle.trim());
-      } else {
-        console.log("Save edit (no handler):", editingId, editingTitle);
       }
     }
     setEditingId(null);

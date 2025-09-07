@@ -10,7 +10,19 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Slider } from "@/components/ui/slider";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Download, Upload, Trash2, Plus, Settings as SettingsIcon, X, RefreshCw } from "lucide-react";
+import { useToast } from "@/lib/use-toast";
 import {
   ProviderConfig,
   UserPreferences,
@@ -26,7 +38,6 @@ import {
   saveUserPreferences,
   initializeDefaultProviders
 } from "@/lib/storage";
-import { fetchModelsForProvider } from "@/lib/model-fetcher";
 
 type FontFamily = "inter" | "geist" | "jetbrains" | "poppins" | "roboto";
 
@@ -38,6 +49,7 @@ export default function Settings() {
   const [newProviderType, setNewProviderType] = useState<AIProvider>("openai");
   const [loading, setLoading] = useState(true);
   const [availableModels, setAvailableModels] = useState<Record<string, ModelInfo[]>>({});
+  const { toast } = useToast();
 
   useEffect(() => {
     loadSettings();
@@ -54,11 +66,29 @@ export default function Settings() {
       setProviderConfigs(configs);
       setUserPreferences(preferences);
 
-      // Load models for each provider
+      // Load models for each provider using the API endpoint
       const models: Record<string, ModelInfo[]> = {};
       for (const config of configs) {
         try {
-          models[config.id] = await fetchModelsForProvider(config);
+          const response = await fetch('/api/models', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              providerId: config.id,
+              refresh: false,
+              providerConfig: config
+            })
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            models[config.id] = data.models || [];
+          } else {
+            console.error(`Failed to load models for ${config.name}:`, response.statusText);
+            models[config.id] = [];
+          }
         } catch (error) {
           console.error(`Failed to load models for ${config.name}:`, error);
           models[config.id] = [];
@@ -94,10 +124,27 @@ export default function Settings() {
     setSelectedConfig(newConfig);
     setIsAddingProvider(false);
 
-    // Load models for the new provider
+    // Load models for the new provider using the API endpoint
     try {
-      const models = await fetchModelsForProvider(newConfig);
-      setAvailableModels(prev => ({ ...prev, [newConfig.id]: models }));
+      const response = await fetch('/api/models', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          providerId: newConfig.id,
+          refresh: false,
+          providerConfig: newConfig
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setAvailableModels(prev => ({ ...prev, [newConfig.id]: data.models || [] }));
+      } else {
+        console.error(`Failed to load models for ${newConfig.name}:`, response.statusText);
+        setAvailableModels(prev => ({ ...prev, [newConfig.id]: [] }));
+      }
     } catch (error) {
       console.error(`Failed to load models for ${newConfig.name}:`, error);
       setAvailableModels(prev => ({ ...prev, [newConfig.id]: [] }));
@@ -106,8 +153,24 @@ export default function Settings() {
 
   const refreshModelsForProvider = async (config: ProviderConfig) => {
     try {
-      const models = await fetchModelsForProvider(config, false); // Don't use cache
-      setAvailableModels(prev => ({ ...prev, [config.id]: models }));
+      const response = await fetch('/api/models', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          providerId: config.id,
+          refresh: true, // Force refresh
+          providerConfig: config
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setAvailableModels(prev => ({ ...prev, [config.id]: data.models || [] }));
+      } else {
+        console.error(`Failed to refresh models for ${config.name}:`, response.statusText);
+      }
     } catch (error) {
       console.error(`Failed to refresh models for ${config.name}:`, error);
     }
@@ -125,23 +188,37 @@ export default function Settings() {
       setSelectedConfig(updated);
     }
 
-    // Refresh models for the updated provider
+    // Refresh models for the updated provider using the API endpoint
     try {
-      const models = await fetchModelsForProvider(updated, false); // Don't use cache
-      setAvailableModels(prev => ({ ...prev, [updated.id]: models }));
+      const response = await fetch('/api/models', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          providerId: updated.id,
+          refresh: true, // Force refresh
+          providerConfig: updated
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setAvailableModels(prev => ({ ...prev, [updated.id]: data.models || [] }));
+      } else {
+        console.error(`Failed to refresh models for ${updated.name}:`, response.statusText);
+      }
     } catch (error) {
       console.error(`Failed to refresh models for ${updated.name}:`, error);
     }
   };
 
   const removeProvider = async (configId: string) => {
-    if (confirm("Are you sure you want to remove this provider configuration?")) {
-      await deleteProviderConfig(configId);
-      setProviderConfigs(configs => configs.filter(c => c.id !== configId));
+    await deleteProviderConfig(configId);
+    setProviderConfigs(configs => configs.filter(c => c.id !== configId));
 
-      if (selectedConfig?.id === configId) {
-        setSelectedConfig(null);
-      }
+    if (selectedConfig?.id === configId) {
+      setSelectedConfig(null);
     }
   };
 
@@ -149,7 +226,6 @@ export default function Settings() {
     const settings = {
       providerConfigs: providerConfigs.map(config => ({
         ...config,
-        apiKey: config.apiKey ? "***HIDDEN***" : undefined, // Don't export API keys
       })),
       userPreferences,
     };
@@ -162,11 +238,11 @@ export default function Settings() {
     URL.revokeObjectURL(url);
   };
 
-  const importSettings = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const importSettings = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
       const reader = new FileReader();
-      reader.onload = (e) => {
+      reader.onload = async (e) => {
         try {
           const settings = JSON.parse(e.target?.result as string);
 
@@ -174,11 +250,42 @@ export default function Settings() {
             updateUserPreferences(settings.userPreferences);
           }
 
-          // Note: We don't import provider configs to avoid overwriting API keys
-          alert("Settings imported successfully! Provider configurations are not imported for security reasons.");
+          // Import provider configurations including API keys
+          if (settings.providerConfigs && Array.isArray(settings.providerConfigs)) {
+            // Clear existing provider configs first
+            const existingConfigs = await getAllProviderConfigs();
+            for (const config of existingConfigs) {
+              await deleteProviderConfig(config.id);
+            }
+
+            // Import new provider configs
+            for (const config of settings.providerConfigs) {
+              // Skip configs with hidden API keys (from old exports)
+              if (config.apiKey === "***HIDDEN***") {
+                config.apiKey = undefined;
+              }
+
+              await putProviderConfig({
+                ...config,
+                updatedAt: new Date().toISOString(),
+              });
+            }
+
+            // Reload settings to reflect changes
+            await loadSettings();
+          }
+
+          toast({
+            title: "Success",
+            description: "Settings imported successfully!",
+          });
         } catch (error) {
           console.error("Failed to import settings:", error);
-          alert("Failed to import settings. Please check the file format.");
+          toast({
+            title: "Error",
+            description: "Failed to import settings. Please check the file format.",
+            variant: "destructive",
+          });
         }
       };
       reader.readAsText(file);
@@ -186,17 +293,18 @@ export default function Settings() {
   };
 
   const clearAllData = () => {
-    if (confirm("Are you sure you want to clear all chat history? This cannot be undone.")) {
-      localStorage.clear();
-      if (typeof window !== "undefined" && "indexedDB" in window) {
-        indexedDB.databases().then(databases => {
-          databases.forEach(db => {
-            if (db.name) indexedDB.deleteDatabase(db.name);
-          });
+    localStorage.clear();
+    if (typeof window !== "undefined" && "indexedDB" in window) {
+      indexedDB.databases().then(databases => {
+        databases.forEach(db => {
+          if (db.name) indexedDB.deleteDatabase(db.name);
         });
-      }
-      alert("All data has been cleared.");
+      });
     }
+    toast({
+      title: "Success",
+      description: "All data has been cleared.",
+    });
   };
 
   if (loading) {
@@ -257,19 +365,36 @@ export default function Settings() {
                           </div>
                         </div>
                         <div className="flex items-center gap-1">
-                          {config.apiKey && (
-                            <div className="w-2 h-2 bg-green-500 rounded-full" title="API key configured" />
-                          )}
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              removeProvider(config.id);
-                            }}
-                          >
-                            <X className="w-3 h-3" />
-                          </Button>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={(e: React.MouseEvent) => {
+                                  e.stopPropagation();
+                                }}
+                              >
+                                <X className="w-3 h-3" />
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Remove Provider</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  Are you sure you want to remove this provider configuration? This action cannot be undone.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction
+                                  onClick={() => removeProvider(config.id)}
+                                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                >
+                                  Remove
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
                         </div>
                       </div>
                     </div>
@@ -393,7 +518,7 @@ export default function Settings() {
                     <div className="space-y-0.5">
                       <Label htmlFor="color-code-nodes">Color Code Nodes</Label>
                       <p className="text-sm text-muted-foreground">
-                        Color code AI nodes based on the model used for easy identification
+                        Color code AI nodes based on the model for easy identification
                       </p>
                     </div>
                     <Switch
@@ -432,10 +557,31 @@ export default function Settings() {
                       />
                     </Label>
                   </div>
-                  <Button variant="destructive" className="w-full" onClick={clearAllData}>
-                    <Trash2 className="mr-2 h-4 w-4" />
-                    Clear All Chat History
-                  </Button>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button variant="destructive" className="w-full">
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        Clear All Chat History
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Clear All Data</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          Are you sure you want to clear all chat history? This will permanently delete all your conversations and cannot be undone.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                          onClick={clearAllData}
+                          className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                        >
+                          Clear All Data
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                 </CardContent>
               </Card>
             </div>
@@ -464,6 +610,7 @@ function ProviderConfigCard({
   onSetDefault
 }: ProviderConfigCardProps) {
   const [formData, setFormData] = useState(config);
+  const [isSaving, setIsSaving] = useState(false);
 
   // Reset form data when config changes (e.g., when switching between providers)
   useEffect(() => {
@@ -475,17 +622,51 @@ function ProviderConfigCard({
     if (formData.defaultModel && availableModels.length > 0) {
       const modelExists = availableModels.some(model => model.id === formData.defaultModel);
       if (!modelExists) {
-        setFormData(prev => ({ ...prev, defaultModel: undefined }));
+        setFormData((prev: ProviderConfig) => ({ ...prev, defaultModel: undefined }));
       }
     }
   }, [formData.defaultModel, availableModels]);
 
-  const handleSave = () => {
-    onUpdate(formData);
-  };
+  // Auto-save when formData changes (with debouncing)
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      if (JSON.stringify(formData) !== JSON.stringify(config)) {
+        setIsSaving(true);
+        try {
+          await onUpdate(formData);
+        } finally {
+          setIsSaving(false);
+        }
+      }
+    }, 500); // 500ms debounce
 
-  const handleRefreshModels = () => {
-    onRefreshModels(config);
+    return () => clearTimeout(timer);
+  }, [formData, config, onUpdate]);
+
+  const handleRefreshModels = async () => {
+    // Use current form data instead of saved config for refresh
+    try {
+      const response = await fetch('/api/models', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          providerId: formData.id,
+          refresh: true, // Force refresh
+          providerConfig: formData
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        onRefreshModels(formData);
+      } else {
+        console.error(`Failed to refresh models for ${formData.name}:`, response.statusText);
+      }
+    } catch (error) {
+      console.error(`Failed to refresh models for ${formData.name}:`, error);
+    }
   };
 
   const needsApiKey = !["ollama", "lmstudio"].includes(config.provider);
@@ -495,7 +676,15 @@ function ProviderConfigCard({
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center justify-between">
-          Configure {config.name}
+          <div className="flex items-center gap-2">
+            Configure {config.name}
+            {isSaving && (
+              <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                Saving...
+              </div>
+            )}
+          </div>
           <div className="flex items-center gap-2">
             <div className="flex items-center space-x-2">
               <Switch
@@ -516,7 +705,7 @@ function ProviderConfigCard({
           <Input
             id="name"
             value={formData.name}
-            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormData({ ...formData, name: e.target.value })}
             placeholder="Provider display name"
           />
         </div>
@@ -528,7 +717,7 @@ function ProviderConfigCard({
               id="api-key"
               type="password"
               value={formData.apiKey || ""}
-              onChange={(e) => setFormData({ ...formData, apiKey: e.target.value })}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormData({ ...formData, apiKey: e.target.value })}
               placeholder="Enter your API key"
             />
             <p className="text-xs text-muted-foreground">
@@ -543,7 +732,7 @@ function ProviderConfigCard({
             <Input
               id="base-url"
               value={formData.baseUrl || ""}
-              onChange={(e) => setFormData({ ...formData, baseUrl: e.target.value })}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormData({ ...formData, baseUrl: e.target.value })}
               placeholder={config.provider === "ollama" ? "http://localhost:11434" : "http://localhost:1234"}
             />
           </div>
@@ -564,7 +753,7 @@ function ProviderConfigCard({
             </div>
             <Select
               value={formData.defaultModel || ""}
-              onValueChange={(value) => setFormData({ ...formData, defaultModel: value })}
+              onValueChange={(value: string) => setFormData({ ...formData, defaultModel: value })}
             >
               <SelectTrigger id="default-model">
                 <SelectValue placeholder="Select default model" />
@@ -605,12 +794,6 @@ function ProviderConfigCard({
             </div>
           </div>
         )}
-
-        <div className="flex justify-end pt-4">
-          <Button onClick={handleSave}>
-            Save Configuration
-          </Button>
-        </div>
       </CardContent>
     </Card>
   );

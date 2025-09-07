@@ -52,6 +52,7 @@ export default function ChatCanvas({
     x: number;
     y: number;
   } | null>(null);
+  const [deletingNodes, setDeletingNodes] = useState<Map<string, number>>(new Map());
   const isSelectingRef = useRef(false);
 
   // D3 Force Simulation
@@ -201,7 +202,6 @@ export default function ChatCanvas({
         ...conversationRef.current,
         nodes: settledNodes,
       });
-      console.log("Force simulation settled and stopped");
     });
 
     simulationRef.current = simulation;
@@ -309,6 +309,31 @@ export default function ChatCanvas({
   }, []);
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
+    // Check if the wheel event is happening over interactive elements like dropdowns
+    const target = e.target as HTMLElement;
+
+    // Don't zoom if scrolling over select dropdowns, buttons, or other interactive elements
+    if (
+      // Radix UI Select components
+      target.closest('[data-radix-select-content]') ||
+      target.closest('[data-radix-select-viewport]') ||
+      target.closest('[data-slot="select-content"]') ||
+      target.closest('[data-slot="select-viewport"]') ||
+      target.closest('[role="listbox"]') ||
+      target.closest('[role="option"]') ||
+      // Standard form elements
+      target.closest('select') ||
+      target.closest('button') ||
+      target.closest('textarea') ||
+      target.closest('input') ||
+      // Custom interactive elements
+      target.closest('[data-interactive="true"]') ||
+      // Any scrollable content areas
+      target.closest('[data-scrollable="true"]')
+    ) {
+      return; // Allow default scroll behavior for interactive elements
+    }
+
     e.preventDefault();
     const delta = e.deltaY > 0 ? 0.9 : 1.1;
     setZoom((prev: number) => Math.max(0.1, Math.min(3, prev * delta)));
@@ -344,48 +369,87 @@ export default function ChatCanvas({
       const nodeToDelete = currentConversation.nodes.find((n: ChatNode) => n.id === nodeId);
       if (!nodeToDelete) return;
 
+      // Build tree structure to determine animation order
       const nodesToDelete = new Set<string>();
+      const nodeDepths = new Map<string, number>();
 
-      const collectChildNodes = (id: string) => {
+      const collectChildNodes = (id: string, depth = 0) => {
         nodesToDelete.add(id);
+        nodeDepths.set(id, depth);
         const node = currentConversation.nodes.find((n: ChatNode) => n.id === id);
         if (node) {
-          node.childIds.forEach((childId: string) => collectChildNodes(childId));
+          node.childIds.forEach((childId: string) => collectChildNodes(childId, depth + 1));
         }
       };
 
       collectChildNodes(nodeId);
 
-      const updatedNodes = currentConversation.nodes
-        .filter((node: ChatNode) => !nodesToDelete.has(node.id))
-        .map((node: ChatNode) => ({
-          ...node,
-          childIds: node.childIds.filter(
-            (childId: string) => !nodesToDelete.has(childId),
-          ),
-        }));
-
-      if (nodeToDelete.parentId) {
-        const parentIndex = updatedNodes.findIndex(
-          (n: ChatNode) => n.id === nodeToDelete.parentId,
-        );
-        if (parentIndex !== -1) {
-          updatedNodes[parentIndex] = {
-            ...updatedNodes[parentIndex],
-            childIds: updatedNodes[parentIndex].childIds.filter(
-              (id: string) => id !== nodeId,
-            ),
-          };
+      // Group nodes by depth for cascading animation
+      const nodesByDepth = new Map<number, string[]>();
+      nodeDepths.forEach((depth, nodeId) => {
+        if (!nodesByDepth.has(depth)) {
+          nodesByDepth.set(depth, []);
         }
+        nodesByDepth.get(depth)!.push(nodeId);
+      });
+
+      // Start cascading deletion animation
+      const deletionMap = new Map<string, number>();
+      nodeDepths.forEach((depth, nodeId) => {
+        deletionMap.set(nodeId, depth);
+      });
+      setDeletingNodes(deletionMap);
+
+      // Schedule animations with delays based on depth
+      const maxDepth = Math.max(...nodeDepths.values());
+      for (let depth = 0; depth <= maxDepth; depth++) {
+        const nodesAtDepth = nodesByDepth.get(depth) || [];
+        // Delay increases with depth for chain reaction effect
+        const delay = depth * 150; // 150ms delay between levels
+
+        setTimeout(() => {
+          // Don't need to do anything here as nodes are already marked as deleting
+          // The actual deletion happens after all animations complete
+        }, delay);
       }
 
-      const newConversation = {
-        ...currentConversation,
-        nodes: updatedNodes,
-      };
-      conversationRef.current = newConversation;
+      // After all animations complete, actually delete the nodes
+      const totalAnimationTime = maxDepth * 150 + 300; // depth delays + animation duration
+      setTimeout(() => {
+        const updatedNodes = currentConversation.nodes
+          .filter((node: ChatNode) => !nodesToDelete.has(node.id))
+          .map((node: ChatNode) => ({
+            ...node,
+            childIds: node.childIds.filter(
+              (childId: string) => !nodesToDelete.has(childId),
+            ),
+          }));
 
-      onUpdateConversationRef.current(newConversation);
+        if (nodeToDelete.parentId) {
+          const parentIndex = updatedNodes.findIndex(
+            (n: ChatNode) => n.id === nodeToDelete.parentId,
+          );
+          if (parentIndex !== -1) {
+            updatedNodes[parentIndex] = {
+              ...updatedNodes[parentIndex],
+              childIds: updatedNodes[parentIndex].childIds.filter(
+                (id: string) => id !== nodeId,
+              ),
+            };
+          }
+        }
+
+        const newConversation = {
+          ...currentConversation,
+          nodes: updatedNodes,
+        };
+        conversationRef.current = newConversation;
+
+        // Clear deleting nodes state
+        setDeletingNodes(new Map());
+
+        onUpdateConversationRef.current(newConversation);
+      }, totalAnimationTime);
     },
     [], // No dependencies - uses refs
   );
@@ -525,8 +589,6 @@ export default function ChatCanvas({
       const currentConversation = conversationRef.current;
       if (!currentConversation) return;
 
-      console.log('Moving node:', { nodeId, x, y });
-
       // Track this node as manually fixed
       fixedNodesRef.current.add(nodeId);
 
@@ -548,8 +610,6 @@ export default function ChatCanvas({
       const updatedNodes = currentConversation.nodes.map((node: ChatNode) =>
         node.id === nodeId ? { ...node, x, y } : node,
       );
-
-      console.log('Updated nodes:', updatedNodes.find((n: ChatNode) => n.id === nodeId));
 
       const newConversation = {
         ...currentConversation,
@@ -689,6 +749,8 @@ export default function ChatCanvas({
                 onNodeClick={handleNodeClick}
                 getNodeById={getNodeById}
                 zoom={zoom}
+                isMarkedForDeletion={deletingNodes.has(node.id)}
+                deletionDepth={deletingNodes.get(node.id)}
               />
             ))}
 

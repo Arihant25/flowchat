@@ -185,7 +185,7 @@ export default memo(function ProviderModelSelector({
     const selectedProvider = providers.find(p => p.id === selectedProviderId);
 
     return (
-        <div className={`flex items-center gap-2 ${className}`}>
+        <div className={`flex items-center gap-2 ${className}`} data-interactive="true">
             {/* Provider Selector */}
             <Select
                 value={selectedProviderId}
@@ -216,7 +216,9 @@ export default memo(function ProviderModelSelector({
                 disabled={loadingModels || !selectedProviderId}
             >
                 <SelectTrigger className="w-48">
-                    <SelectValue placeholder="Select model" />
+                    <SelectValue placeholder="Select model">
+                        {selectedModel && models.find(m => m.id === selectedModel)?.name}
+                    </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                     {models.map((model) => (
@@ -246,16 +248,6 @@ export default memo(function ProviderModelSelector({
                 title="Refresh models"
             >
                 <RefreshCw className={`w-4 h-4 ${loadingModels ? "animate-spin" : ""}`} />
-            </Button>
-
-            {/* Settings Button */}
-            <Button
-                variant="outline"
-                size="sm"
-                onClick={() => window.open("/settings", "_blank")}
-                title="Open settings"
-            >
-                <Settings className="w-4 h-4" />
             </Button>
         </div>
     );

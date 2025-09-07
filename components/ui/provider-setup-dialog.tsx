@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { ArrowLeft, CheckCircle } from "lucide-react";
 import { AIProvider, ProviderConfig, DEFAULT_PROVIDER_CONFIGS } from "@/lib/types";
 import { putProviderConfig, getAllProviderConfigs } from "@/lib/storage";
+import { useToast } from "@/lib/use-toast";
 
 interface ProviderSetupDialogProps {
     isOpen: boolean;
@@ -67,6 +68,7 @@ export default function ProviderSetupDialog({
     const [apiKey, setApiKey] = useState("");
     const [baseUrl, setBaseUrl] = useState("");
     const [isConfiguring, setIsConfiguring] = useState(false);
+    const { toast } = useToast();
 
     if (!isOpen) return null;
 
@@ -133,7 +135,11 @@ export default function ProviderSetupDialog({
             onClose();
         } catch (error) {
             console.error("Failed to configure provider:", error);
-            alert("Failed to configure provider. Please try again.");
+            toast({
+                title: "Configuration Failed",
+                description: "Please try again.",
+                variant: "destructive",
+            });
         } finally {
             setIsConfiguring(false);
         }
