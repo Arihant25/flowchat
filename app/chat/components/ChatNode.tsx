@@ -358,10 +358,10 @@ export default function ChatNodeComponent({
     }
 
     setIsDragging(true);
-    // Store the initial mouse position relative to the node
+    // Store the initial mouse position relative to the node, accounting for zoom
     setDragStart({
-      x: e.clientX,
-      y: e.clientY
+      x: e.clientX / zoom,
+      y: e.clientY / zoom
     });
     setDragOffset({ x: 0, y: 0 });
     e.preventDefault();
@@ -373,10 +373,10 @@ export default function ChatNodeComponent({
     if (!isDragging) return;
 
     const handleGlobalMouseMove = (e: MouseEvent) => {
-      // Calculate offset from the initial drag start position
+      // Calculate offset from the initial drag start position, accounting for zoom
       const newOffset = {
-        x: e.clientX - dragStart.x,
-        y: e.clientY - dragStart.y
+        x: (e.clientX / zoom) - dragStart.x,
+        y: (e.clientY / zoom) - dragStart.y
       };
       setDragOffset(newOffset);
     };
@@ -398,7 +398,7 @@ export default function ChatNodeComponent({
       document.removeEventListener('mousemove', handleGlobalMouseMove);
       document.removeEventListener('mouseup', handleGlobalMouseUp);
     };
-  }, [isDragging, dragStart, dragOffset, node.x, node.y, node.id]);
+  }, [isDragging, dragStart, dragOffset, node.x, node.y, node.id, zoom]);
 
   return (
     <>

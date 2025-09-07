@@ -55,6 +55,7 @@ export default function ChatCanvas({
   const simulationRef = useRef<d3.Simulation<SimulationNode, SimulationLink> | null>(null);
   const nodesRef = useRef<SimulationNode[]>([]);
   const linksRef = useRef<SimulationLink[]>([]);
+  const fixedNodesRef = useRef<Set<string>>(new Set());
 
   // Use ref to avoid recreating callbacks when conversation changes
   const conversationRef = useRef<ChatConversation | null>(conversation);
@@ -78,8 +79,8 @@ export default function ChatCanvas({
     isEditing: node.isEditing,
     thinking: node.thinking,
     thinkingTime: node.thinkingTime,
-    fx: null, // Allow movement by default
-    fy: null, // Allow movement by default
+    fx: fixedNodesRef.current.has(node.id) ? node.x : null, // Keep fixed if manually moved
+    fy: fixedNodesRef.current.has(node.id) ? node.y : null, // Keep fixed if manually moved
   }), []);
 
   // Create links from parent-child relationships
@@ -114,24 +115,25 @@ export default function ChatCanvas({
       simulationRef.current.stop();
     }
 
-    // Create new simulation with improved settings
+    // Create new simulation with improved settings for quick settling
     const simulation = d3.forceSimulation<SimulationNode>(simNodes)
       .force("link", d3.forceLink<SimulationNode, SimulationLink>(simLinks)
         .id(d => d.id)
         .distance(250) // Increased distance between connected nodes
-        .strength(0.6) // Slightly stronger link force
+        .strength(0.3) // Reduced strength for less aggressive positioning
       )
       .force("charge", d3.forceManyBody()
-        .strength(-400) // Stronger repulsion between nodes
-        .distanceMax(500) // Increased max distance for repulsion
+        .strength(-6000) // Reduced repulsion strength
+        .distanceMax(10000) // Increased max distance for repulsion
       )
-      .force("center", d3.forceCenter(0, 0)) // Center the graph
+      .force("center", d3.forceCenter(0, 0).strength(0.1)) // Much weaker centering force
       .force("collision", d3.forceCollide()
         .radius(120) // Increased minimum distance between nodes
-        .strength(0.8) // Stronger collision force
+        .strength(0.8) // Slightly reduced collision strength
       )
-      .alphaDecay(0.015) // Even slower decay for smoother animation
-      .velocityDecay(0.5); // Increased friction for more stability
+      .alphaDecay(0.1) // Much faster settling - simulation stops quickly
+      .velocityDecay(0.4) // Higher decay for much quicker stops
+      .alphaMin(0.001); // Lower minimum alpha for complete stop
 
     // Update node positions on each tick
     simulation.on("tick", () => {
@@ -140,11 +142,14 @@ export default function ChatCanvas({
       const updatedNodes = conversationRef.current.nodes.map(node => {
         const simNode = simNodes.find(n => n.id === node.id);
         if (simNode && simNode.x !== undefined && simNode.y !== undefined) {
-          return {
-            ...node,
-            x: simNode.x,
-            y: simNode.y,
-          };
+          // Only update position if the node is not manually fixed
+          if (!fixedNodesRef.current.has(node.id)) {
+            return {
+              ...node,
+              x: simNode.x,
+              y: simNode.y,
+            };
+          }
         }
         return node;
       });
@@ -153,6 +158,11 @@ export default function ChatCanvas({
         ...conversationRef.current,
         nodes: updatedNodes,
       });
+    });
+
+    // Stop the simulation automatically when it settles
+    simulation.on("end", () => {
+      console.log("Force simulation settled and stopped");
     });
 
     simulationRef.current = simulation;
@@ -458,16 +468,21 @@ export default function ChatCanvas({
 
       console.log('Moving node:', { nodeId, x, y });
 
+      // Track this node as manually fixed
+      fixedNodesRef.current.add(nodeId);
+
       // Update the force simulation node if simulation is enabled
       if (simulationRef.current) {
         const simNode = nodesRef.current.find(n => n.id === nodeId);
         if (simNode) {
-          // Do not fix the node position; allow simulation to continue
+          // Fix the node position to prevent simulation from moving it
+          simNode.fx = x;
+          simNode.fy = y;
           simNode.x = x;
           simNode.y = y;
 
-          // Restart simulation with a low alpha to settle other nodes
-          simulationRef.current.alpha(0.1).restart();
+          // Don't restart the simulation - just let it continue with the fixed position
+          // The simulation will naturally settle without forcing movement
         }
       }
 
@@ -623,13 +638,13 @@ export default function ChatCanvas({
                       >
                         <polygon
                           points="0 0, 10 3.5, 0 7"
-                          fill="rgba(59, 130, 246, 0.8)"
+                          fill="var(--foreground)"
                         />
                       </marker>
                     </defs>
                     <path
                       d={pathData}
-                      stroke="rgba(59, 130, 246, 0.8)"
+                      stroke="var(--foreground)"
                       strokeWidth="3"
                       fill="none"
                       markerEnd={`url(#force-arrowhead-${index})`}
@@ -687,13 +702,13 @@ export default function ChatCanvas({
                         >
                           <polygon
                             points="0 0, 10 3.5, 0 7"
-                            fill={"rgba(100, 116, 139, 0.7)"}
+                            fill="var(--foreground)"
                           />
                         </marker>
                       </defs>
                       <path
                         d={pathData}
-                        stroke={"rgba(100, 116, 139, 0.7)"}
+                        stroke="var(--foreground)"
                         strokeWidth={"2"}
                         fill="none"
                         markerEnd={`url(#arrowhead-${node.id}-${childId})`}
