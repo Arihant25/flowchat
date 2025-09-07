@@ -334,7 +334,6 @@ export default function ChatNodeComponent({
       return;
     }
 
-    console.log('Starting drag for node:', node.id, 'at position:', { x: node.x, y: node.y });
     setIsDragging(true);
     // Store the initial mouse position relative to the node
     setDragStart({
@@ -364,7 +363,6 @@ export default function ChatNodeComponent({
         setIsDragging(false);
         const newX = node.x + dragOffset.x;
         const newY = node.y + dragOffset.y;
-        console.log('Ending drag for node:', node.id, 'new position:', { newX, newY }, 'offset:', dragOffset);
         propsRef.current.onMoveNode(node.id, newX, newY);
         setDragOffset({ x: 0, y: 0 });
       }

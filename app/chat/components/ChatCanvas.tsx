@@ -264,10 +264,13 @@ export default function ChatCanvas({
         node.id === nodeId ? { ...node, ...updates } : node,
       );
 
-      onUpdateConversationRef.current({
+      const newConversation = {
         ...currentConversation,
         nodes: updatedNodes,
-      });
+      };
+      conversationRef.current = newConversation;
+
+      onUpdateConversationRef.current(newConversation);
     },
     [], // No dependencies - uses refs
   );
@@ -315,10 +318,13 @@ export default function ChatCanvas({
         }
       }
 
-      onUpdateConversationRef.current({
+      const newConversation = {
         ...currentConversation,
         nodes: updatedNodes,
-      });
+      };
+      conversationRef.current = newConversation;
+
+      onUpdateConversationRef.current(newConversation);
     },
     [], // No dependencies - uses refs
   );
@@ -337,10 +343,12 @@ export default function ChatCanvas({
             : node,
         );
 
-        onUpdateConversationRef.current({
+        const newConversation = {
           ...currentConversation,
           nodes: [...updatedNodes, aiResponseWithParent],
-        });
+        };
+        conversationRef.current = newConversation;
+        onUpdateConversationRef.current(newConversation);
       } else {
         // Create a new user input node
         // If force simulation is enabled, position near parent but let simulation handle final positioning
@@ -371,10 +379,12 @@ export default function ChatCanvas({
             : node,
         );
 
-        onUpdateConversationRef.current({
+        const newConversation = {
           ...currentConversation,
           nodes: [...updatedNodes, newNode],
-        });
+        };
+        conversationRef.current = newConversation;
+        onUpdateConversationRef.current(newConversation);
       }
     },
     [], // Add dependency on force simulation state
@@ -422,10 +432,12 @@ export default function ChatCanvas({
         previousNewNode = newNode;
       });
 
-      onUpdateConversationRef.current({
+      const newConversation = {
         ...currentConversation,
         nodes: [...currentConversation.nodes, ...newNodes],
-      });
+      };
+      conversationRef.current = newConversation;
+      onUpdateConversationRef.current(newConversation);
     },
     [], // No dependencies - uses refs
   );
@@ -465,10 +477,12 @@ export default function ChatCanvas({
 
       console.log('Updated nodes:', updatedNodes.find(n => n.id === nodeId));
 
-      onUpdateConversationRef.current({
+      const newConversation = {
         ...currentConversation,
         nodes: updatedNodes,
-      });
+      };
+      conversationRef.current = newConversation;
+      onUpdateConversationRef.current(newConversation);
     },
     [], // Add dependency on force simulation state
   );
@@ -567,7 +581,6 @@ export default function ChatCanvas({
                   return null;
                 }
 
-                const isHighlighted = false;
                 const nodeWidth = 384;
                 const nodeHeight = 120;
 
@@ -632,7 +645,6 @@ export default function ChatCanvas({
                   );
                   if (!childNode) return null;
 
-                  const isHighlighted = false;
                   const nodeWidth = 384;
                   const nodeHeight = 120;
 
@@ -675,14 +687,14 @@ export default function ChatCanvas({
                         >
                           <polygon
                             points="0 0, 10 3.5, 0 7"
-                            fill={isHighlighted ? "rgba(59, 130, 246, 0.8)" : "rgba(100, 116, 139, 0.7)"}
+                            fill={"rgba(100, 116, 139, 0.7)"}
                           />
                         </marker>
                       </defs>
                       <path
                         d={pathData}
-                        stroke={isHighlighted ? "rgba(59, 130, 246, 0.8)" : "rgba(100, 116, 139, 0.7)"}
-                        strokeWidth={isHighlighted ? "3" : "2"}
+                        stroke={"rgba(100, 116, 139, 0.7)"}
+                        strokeWidth={"2"}
                         fill="none"
                         markerEnd={`url(#arrowhead-${node.id}-${childId})`}
                         className="transition-all duration-200"
