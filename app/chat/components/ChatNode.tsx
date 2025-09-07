@@ -5,7 +5,7 @@ import { ChatNode } from "../page";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, X, GitBranch, Send } from "lucide-react";
+import { Plus, X, GitBranch, Send, Copy, Check } from "lucide-react";
 import ProviderModelSelector from "@/components/ui/provider-model-selector";
 import ThinkingIndicator from "@/components/ui/thinking-indicator";
 import MarkdownRenderer from "@/components/ui/markdown-renderer";
@@ -47,6 +47,7 @@ export default function ChatNodeComponent({
   const [selectedProviderId, setSelectedProviderId] = useState("");
   const [selectedModel, setSelectedModel] = useState("");
   const [streamingResponse, setStreamingResponse] = useState<StreamingResponse | null>(null);
+  const [copied, setCopied] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -341,28 +342,35 @@ export default function ChatNodeComponent({
     propsRef.current.onAddChild(node.id, node.x, childY);
   };
 
-  const handleTextSelect = () => {
+  const handleTextSelect = (e: React.MouseEvent) => {
+    if (node.isUser) return; // only AI nodes
+    e.stopPropagation();
     const selection = window.getSelection();
-    if (selection && selection.toString().trim()) {
+    if (selection && selection.toString().trim() && selection.rangeCount > 0) {
       const range = selection.getRangeAt(0);
       const rect = range.getBoundingClientRect();
-      propsRef.current.onTextSelection(node.id, selection.toString(), rect.right, rect.top);
+      propsRef.current.onTextSelection(node.id, selection.toString(), rect.left, rect.top);
     }
   };
 
   // D3-style drag handling with improved momentum
   const handleMouseDown = (e: React.MouseEvent) => {
-    // Only start dragging if clicking on the card or header, not on interactive elements
+    // Only start dragging if clicking outside selectable text/content and interactive elements
     const target = e.target as HTMLElement;
-    if (target.closest('button') || target.closest('textarea') || target.closest('select') || target.closest('[data-interactive="true"]')) {
-      return;
+    if (
+      target.closest('button') ||
+      target.closest('textarea') ||
+      target.closest('select') ||
+      target.closest('[data-interactive="true"]') ||
+      target.closest('[data-selectable-content="true"]') // allow text selection
+    ) {
+      return; // do not initiate drag
     }
 
     setIsDragging(true);
-    // Store the initial mouse position relative to the node, accounting for zoom
     setDragStart({
       x: e.clientX / zoom,
-      y: e.clientY / zoom
+      y: e.clientY / zoom,
     });
     setDragOffset({ x: 0, y: 0 });
     e.preventDefault();
@@ -416,32 +424,49 @@ export default function ChatNodeComponent({
       >
         <Card
           ref={cardRef}
-          className={`chat-node-card min-w-[32rem] max-w-[48rem] transition-all duration-200 border-2 ${nodeBorderColor} ${isHovered ? "shadow-lg scale-105" : "shadow-md"} ${isDragging ? "shadow-2xl ring-2 ring-blue-400 ring-opacity-50 scale-95" : ""
-            } cursor-grab active:cursor-grabbing select-none`}
+          className={`chat-node-card min-w-[32rem] max-w-[48rem] transition-all duration-200 border-2 ${nodeBorderColor} ${isHovered ? "shadow-lg scale-105" : "shadow-md"} ${isDragging ? "shadow-2xl ring-2 ring-blue-400 ring-opacity-50 scale-95" : ""} cursor-grab active:cursor-grabbing`}
           onMouseEnter={() => setIsHovered(true)}
           onMouseLeave={() => setIsHovered(false)}
           onMouseDown={handleMouseDown}
         >
           <CardContent className="p-4 relative">
             {isHovered && (
-              <div className="absolute -top-2 -right-2 flex gap-1">
+              <div className="absolute -top-2 right-2 flex gap-1 z-10">
                 <Button
                   size="icon"
                   variant="outline"
-                  className="w-6 h-6"
-                  onClick={() => propsRef.current.onBranch(node.id)} // Use current node prop
-                  title="Branch conversation"
+                  className="w-8 h-8 bg-background/90 backdrop-blur-sm"
+                  onClick={async (e: React.MouseEvent<HTMLButtonElement>) => {
+                    e.stopPropagation();
+                    try {
+                      await navigator.clipboard.writeText(node.content || "");
+                      setCopied(true);
+                      setTimeout(() => setCopied(false), 1500);
+                    } catch (err) {
+                      console.warn('Copy failed', err);
+                    }
+                  }}
+                  title="Copy content"
                 >
-                  <GitBranch className="w-3 h-3" />
+                  {copied ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
                 </Button>
                 <Button
                   size="icon"
                   variant="outline"
-                  className="w-6 h-6"
+                  className="w-8 h-8 bg-background/90 backdrop-blur-sm"
+                  onClick={() => propsRef.current.onBranch(node.id)} // Use current node prop
+                  title="Branch conversation"
+                >
+                  <GitBranch className="w-4 h-4" />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="outline"
+                  className="w-8 h-8 bg-background/90 backdrop-blur-sm"
                   onClick={handleDelete}
                   title="Delete node"
                 >
-                  <X className="w-3 h-3" />
+                  <X className="w-4 h-4" />
                 </Button>
               </div>
             )}
@@ -471,7 +496,7 @@ export default function ChatNodeComponent({
                 <Textarea
                   ref={textareaRef}
                   value={localContent}
-                  onChange={(e) => setLocalContent(e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setLocalContent(e.target.value)}
                   onBlur={() => {
                     // Only sync content when losing focus if content changed
                     if (localContent !== node.content) {
@@ -480,7 +505,7 @@ export default function ChatNodeComponent({
                   }}
                   placeholder="Type your message..."
                   className="min-h-20 resize-none"
-                  onKeyDown={(e) => {
+                  onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
                     if (e.key === "Enter" && !e.ctrlKey && !e.shiftKey) {
                       e.preventDefault();
                       handleSubmit();
@@ -515,6 +540,7 @@ export default function ChatNodeComponent({
               <div
                 ref={contentRef}
                 className="select-text cursor-text"
+                data-selectable-content="true"
                 onMouseUp={handleTextSelect}
               >
                 <MarkdownRenderer
@@ -532,11 +558,11 @@ export default function ChatNodeComponent({
               <Button
                 size="sm"
                 variant="ghost"
-                className="absolute -bottom-8 left-1/2 transform -translate-x-1/2 w-8 h-8 p-0"
+                className="absolute -bottom-6 left-1/2 transform -translate-x-1/2 w-10 h-10 p-0"
                 onClick={handleAddChild}
                 title="Add follow-up message"
               >
-                <Plus className="w-4 h-4" />
+                <Plus className="w-5 h-5" />
               </Button>
             )}
           </CardContent>

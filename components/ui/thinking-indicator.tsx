@@ -51,13 +51,13 @@ export default function ThinkingIndicator({ thinking, thinkingTime, isThinking }
     };
 
     return (
-        <Card className={`mb-2 border-gray-200 ${isThinking ? 'bg-blue-50 border-blue-200' : 'bg-gray-50'
+        <Card className={`mb-2 border-gray-200 dark:border-gray-700 ${isThinking ? 'bg-blue-50 dark:bg-gray-800 border-blue-200 dark:border-blue-800' : 'bg-gray-50 dark:bg-gray-800'
             }`}>
             <CardContent className="p-3">
                 <Button
                     variant="ghost"
                     size="sm"
-                    className="w-full justify-between p-0 h-auto text-sm text-gray-600 hover:bg-transparent"
+                    className="w-full justify-between p-0 h-auto text-sm text-gray-600 dark:text-gray-300 hover:bg-transparent"
                     onClick={() => !isThinking && setIsExpanded(!isExpanded)}
                     disabled={isThinking}
                 >
@@ -76,12 +76,12 @@ export default function ThinkingIndicator({ thinking, thinkingTime, isThinking }
                 </Button>
 
                 {(isExpanded || isThinking) && (thinking || isThinking) && (
-                    <div className="mt-2 pt-2 border-t border-gray-200">
-                        <div className={`text-sm whitespace-pre-wrap font-mono leading-relaxed ${isThinking ? 'text-gray-700' : 'text-gray-500'
+                    <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
+                        <div className={`text-sm whitespace-pre-wrap font-mono leading-relaxed ${isThinking ? 'text-gray-700 dark:text-gray-300' : 'text-gray-500 dark:text-gray-400'
                             }`}>
                             {thinking || "Thinking..."}
                             {isThinking && (
-                                <span className="inline-block w-2 h-4 bg-gray-400 ml-1 animate-pulse" />
+                                <span className="inline-block w-2 h-4 bg-gray-400 dark:bg-gray-500 ml-1 animate-pulse" />
                             )}
                         </div>
                     </div>

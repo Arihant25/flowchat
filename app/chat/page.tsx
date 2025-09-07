@@ -123,14 +123,49 @@ export default function ChatPage() {
 
   const updateConversation = useCallback(
     (updatedConversation: ChatConversation) => {
-      setCurrentConversation(updatedConversation);
-      setConversations((prev) =>
-        prev.map((conv) =>
-          conv.id === updatedConversation.id
-            ? { ...updatedConversation, lastModified: new Date() }
-            : conv,
-        ),
-      );
+      // Skip update if nothing meaningful changed (positions/content/title/node count)
+      setCurrentConversation((prev) => {
+        if (prev && prev.id === updatedConversation.id) {
+          const prevNodes = prev.nodes;
+          const nextNodes = updatedConversation.nodes;
+          if (prevNodes.length === nextNodes.length) {
+            let changed = false;
+            for (let i = 0; i < prevNodes.length; i++) {
+              const p = prevNodes[i];
+              const n = nextNodes[i];
+              if (
+                p.id !== n.id ||
+                p.content !== n.content ||
+                p.x !== n.x ||
+                p.y !== n.y ||
+                p.childIds.length !== n.childIds.length
+              ) {
+                changed = true;
+                break;
+              }
+            }
+            if (!changed && prev.title === updatedConversation.title) {
+              return prev; // no meaningful change
+            }
+          }
+        }
+        return updatedConversation;
+      });
+
+      setConversations((prev) => {
+        let modified = false;
+        const next = prev.map((conv) => {
+          if (conv.id === updatedConversation.id) {
+            // Shallow compare to avoid unnecessary array recreation
+            const sameRef = conv === updatedConversation;
+            if (sameRef) return conv;
+            modified = true;
+            return { ...updatedConversation, lastModified: new Date() };
+          }
+          return conv;
+        });
+        return modified ? next : prev;
+      });
       // persist
       try {
         const toStore: StoredConversation = {

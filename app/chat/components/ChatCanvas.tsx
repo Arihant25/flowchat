@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import * as d3 from "d3";
 import { ChatConversation, ChatNode } from "../page";
 import ChatNodeComponent from "./ChatNode";
@@ -27,6 +27,8 @@ interface SimulationNode extends d3.SimulationNodeDatum {
   thinkingTime?: number;
   fx?: number | null; // Fixed position
   fy?: number | null; // Fixed position
+  x?: number; // d3 will mutate
+  y?: number; // d3 will mutate
 }
 
 interface SimulationLink extends d3.SimulationLinkDatum<SimulationNode> {
@@ -50,6 +52,7 @@ export default function ChatCanvas({
     x: number;
     y: number;
   } | null>(null);
+  const isSelectingRef = useRef(false);
 
   // D3 Force Simulation
   const simulationRef = useRef<d3.Simulation<SimulationNode, SimulationLink> | null>(null);
@@ -97,14 +100,18 @@ export default function ChatCanvas({
     return links;
   }, []);
 
-  // Initialize or update force simulation
+  // Track last position update to throttle conversation updates
+  const lastTickUpdateRef = useRef<number>(0);
+  const lastPositionsRef = useRef<Map<string, { x: number, y: number }>>(new Map());
+
+  // Initialize or update force simulation (only when structure changes, not every position update)
   const updateForceSimulation = useCallback(() => {
     if (!conversation || conversation.nodes.length === 0) {
       return;
     }
 
     // Convert nodes and create links
-    const simNodes = conversation.nodes.map(chatNodeToSimulationNode);
+    const simNodes: SimulationNode[] = conversation.nodes.map(chatNodeToSimulationNode);
     const simLinks = createLinks(conversation.nodes);
 
     nodesRef.current = simNodes;
@@ -118,60 +125,102 @@ export default function ChatCanvas({
     // Create new simulation with improved settings for quick settling
     const simulation = d3.forceSimulation<SimulationNode>(simNodes)
       .force("link", d3.forceLink<SimulationNode, SimulationLink>(simLinks)
-        .id(d => d.id)
-        .distance(250) // Increased distance between connected nodes
-        .strength(0.3) // Reduced strength for less aggressive positioning
+        .id((d: SimulationNode) => d.id)
+        .distance(250)
+        .strength(0.3)
       )
       .force("charge", d3.forceManyBody()
-        .strength(-6000) // Reduced repulsion strength
-        .distanceMax(10000) // Increased max distance for repulsion
+        .strength(-6000)
+        .distanceMax(10000)
       )
-      .force("center", d3.forceCenter(0, 0).strength(0.1)) // Much weaker centering force
+      .force("center", d3.forceCenter(0, 0).strength(0.1))
       .force("collision", d3.forceCollide()
-        .radius(120) // Increased minimum distance between nodes
-        .strength(0.8) // Slightly reduced collision strength
+        .radius(310)
+        .strength(2.0)
       )
-      .alphaDecay(0.1) // Much faster settling - simulation stops quickly
-      .velocityDecay(0.4) // Higher decay for much quicker stops
-      .alphaMin(0.001); // Lower minimum alpha for complete stop
+      .alphaDecay(0.1)
+      .velocityDecay(0.4)
+      .alphaMin(0.001);
 
-    // Update node positions on each tick
+    // Update node positions on each tick - throttled and change-detected
     simulation.on("tick", () => {
       if (!conversationRef.current) return;
 
-      const updatedNodes = conversationRef.current.nodes.map(node => {
-        const simNode = simNodes.find(n => n.id === node.id);
+      const now = performance.now();
+      // Throttle updates to at most ~20fps (50ms)
+      if (now - lastTickUpdateRef.current < 50) {
+        return;
+      }
+
+      const updatedNodes = conversationRef.current.nodes.map((node: ChatNode) => {
+        const simNode = (simNodes as SimulationNode[]).find(n => n.id === node.id);
         if (simNode && simNode.x !== undefined && simNode.y !== undefined) {
-          // Only update position if the node is not manually fixed
           if (!fixedNodesRef.current.has(node.id)) {
-            return {
-              ...node,
-              x: simNode.x,
-              y: simNode.y,
-            };
+            return { ...node, x: simNode.x, y: simNode.y };
           }
         }
         return node;
       });
 
+      // Detect if positions actually changed meaningfully
+      let changed = false;
+      for (const n of updatedNodes) {
+        const prev = lastPositionsRef.current.get(n.id);
+        const dx = prev ? Math.abs(prev.x - n.x) : Infinity;
+        const dy = prev ? Math.abs(prev.y - n.y) : Infinity;
+        if (dx > 0.5 || dy > 0.5) { // ignore sub-pixel jitter
+          changed = true;
+          break;
+        }
+      }
+      if (!changed) return;
+
+      // Update cache
+      lastPositionsRef.current.clear();
+      updatedNodes.forEach((n: ChatNode) => lastPositionsRef.current.set(n.id, { x: n.x, y: n.y }));
+      lastTickUpdateRef.current = now;
+
+      // Push minimal update upstream without triggering simulation recreation (structure unchanged)
       onUpdateConversationRef.current({
         ...conversationRef.current,
         nodes: updatedNodes,
       });
     });
 
-    // Stop the simulation automatically when it settles
     simulation.on("end", () => {
+      // Final update to ensure latest settled positions persisted
+      if (!conversationRef.current) return;
+      const settledNodes = conversationRef.current.nodes.map((node: ChatNode) => {
+        const simNode = (simNodes as SimulationNode[]).find(n => n.id === node.id);
+        if (simNode && simNode.x !== undefined && simNode.y !== undefined && !fixedNodesRef.current.has(node.id)) {
+          return { ...node, x: simNode.x, y: simNode.y };
+        }
+        return node;
+      });
+      onUpdateConversationRef.current({
+        ...conversationRef.current,
+        nodes: settledNodes,
+      });
       console.log("Force simulation settled and stopped");
     });
 
     simulationRef.current = simulation;
   }, [conversation, chatNodeToSimulationNode, createLinks]);
 
-  // Update simulation when conversation changes
+  // Build a structural signature (ids + child relationships) to decide when to rebuild simulation
+  const structureSignature = useMemo(() => {
+    if (!conversation) return "none";
+    // Only include stable structural info, not positions/content
+    return conversation.nodes
+      .map(n => `${n.id}:${n.childIds.join(',')}`)
+      .sort()
+      .join('|');
+  }, [conversation]);
+
+  // Rebuild simulation only when structure (not positions) changes
   useEffect(() => {
     updateForceSimulation();
-  }, [conversation?.nodes, updateForceSimulation]);
+  }, [structureSignature, updateForceSimulation]);
 
   // Cleanup simulation on unmount
   useEffect(() => {
@@ -248,7 +297,7 @@ export default function ChatCanvas({
       if (isPanning) {
         const deltaX = e.clientX - lastPanPoint.x;
         const deltaY = e.clientY - lastPanPoint.y;
-        setPan((prev) => ({ x: prev.x + deltaX, y: prev.y + deltaY }));
+        setPan((prev: { x: number; y: number }) => ({ x: prev.x + deltaX, y: prev.y + deltaY }));
         setLastPanPoint({ x: e.clientX, y: e.clientY });
       }
     },
@@ -262,15 +311,17 @@ export default function ChatCanvas({
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
     const delta = e.deltaY > 0 ? 0.9 : 1.1;
-    setZoom((prev) => Math.max(0.1, Math.min(3, prev * delta)));
+    setZoom((prev: number) => Math.max(0.1, Math.min(3, prev * delta)));
   }, []);
 
   const updateNode = useCallback(
     (nodeId: string, updates: Partial<ChatNode>) => {
+      // Avoid state churn that might clear highlight while user is dragging selection
+      if (isSelectingRef.current) return;
       const currentConversation = conversationRef.current;
       if (!currentConversation) return;
 
-      const updatedNodes = currentConversation.nodes.map((node) =>
+      const updatedNodes = currentConversation.nodes.map((node: ChatNode) =>
         node.id === nodeId ? { ...node, ...updates } : node,
       );
 
@@ -290,39 +341,39 @@ export default function ChatCanvas({
       const currentConversation = conversationRef.current;
       if (!currentConversation) return;
 
-      const nodeToDelete = currentConversation.nodes.find((n) => n.id === nodeId);
+      const nodeToDelete = currentConversation.nodes.find((n: ChatNode) => n.id === nodeId);
       if (!nodeToDelete) return;
 
       const nodesToDelete = new Set<string>();
 
       const collectChildNodes = (id: string) => {
         nodesToDelete.add(id);
-        const node = currentConversation.nodes.find((n) => n.id === id);
+        const node = currentConversation.nodes.find((n: ChatNode) => n.id === id);
         if (node) {
-          node.childIds.forEach((childId) => collectChildNodes(childId));
+          node.childIds.forEach((childId: string) => collectChildNodes(childId));
         }
       };
 
       collectChildNodes(nodeId);
 
       const updatedNodes = currentConversation.nodes
-        .filter((node) => !nodesToDelete.has(node.id))
-        .map((node) => ({
+        .filter((node: ChatNode) => !nodesToDelete.has(node.id))
+        .map((node: ChatNode) => ({
           ...node,
           childIds: node.childIds.filter(
-            (childId) => !nodesToDelete.has(childId),
+            (childId: string) => !nodesToDelete.has(childId),
           ),
         }));
 
       if (nodeToDelete.parentId) {
         const parentIndex = updatedNodes.findIndex(
-          (n) => n.id === nodeToDelete.parentId,
+          (n: ChatNode) => n.id === nodeToDelete.parentId,
         );
         if (parentIndex !== -1) {
           updatedNodes[parentIndex] = {
             ...updatedNodes[parentIndex],
             childIds: updatedNodes[parentIndex].childIds.filter(
-              (id) => id !== nodeId,
+              (id: string) => id !== nodeId,
             ),
           };
         }
@@ -340,14 +391,14 @@ export default function ChatCanvas({
   );
 
   const addChildNode = useCallback(
-    (parentId: string, x: number, y: number, aiResponse?: ChatNode) => {
+    (parentId: string, x: number, y: number, aiResponse?: ChatNode, initialUserContent?: string) => {
       const currentConversation = conversationRef.current;
       if (!currentConversation) return;
 
       if (aiResponse) {
         // Add the provided AI response node with parentId set
         const aiResponseWithParent = { ...aiResponse, parentId };
-        const updatedNodes = currentConversation.nodes.map((node) =>
+        const updatedNodes = currentConversation.nodes.map((node: ChatNode) =>
           node.id === parentId
             ? { ...node, childIds: [...node.childIds, aiResponse.id] }
             : node,
@@ -362,7 +413,7 @@ export default function ChatCanvas({
       } else {
         // Create a new user input node
         // If force simulation is enabled, position near parent but let simulation handle final positioning
-        const parentNode = currentConversation.nodes.find(n => n.id === parentId);
+        const parentNode = currentConversation.nodes.find((n: ChatNode) => n.id === parentId);
         let nodeX = x;
         let nodeY = y;
 
@@ -374,7 +425,7 @@ export default function ChatCanvas({
 
         const newNode: ChatNode = {
           id: `node-${Date.now()}`,
-          content: "",
+          content: initialUserContent ?? "",
           isUser: true,
           x: nodeX,
           y: nodeY,
@@ -383,7 +434,7 @@ export default function ChatCanvas({
           isEditing: true,
         };
 
-        const updatedNodes = currentConversation.nodes.map((node) =>
+        const updatedNodes = currentConversation.nodes.map((node: ChatNode) =>
           node.id === parentId
             ? { ...node, childIds: [...node.childIds, newNode.id] }
             : node,
@@ -405,7 +456,7 @@ export default function ChatCanvas({
       const currentConversation = conversationRef.current;
       if (!currentConversation) return;
 
-      const nodeIndex = currentConversation.nodes.findIndex((n) => n.id === nodeId);
+      const nodeIndex = currentConversation.nodes.findIndex((n: ChatNode) => n.id === nodeId);
       if (nodeIndex === -1) return;
 
       const originalNode = currentConversation.nodes[nodeIndex];
@@ -415,7 +466,7 @@ export default function ChatCanvas({
       while (currentNode) {
         conversationHistory.unshift(currentNode);
         currentNode = currentNode.parentId
-          ? currentConversation.nodes.find((n) => n.id === currentNode!.parentId)
+          ? currentConversation.nodes.find((n: ChatNode) => n.id === currentNode!.parentId)
           : undefined;
       }
 
@@ -456,6 +507,14 @@ export default function ChatCanvas({
     (nodeId: string, text: string, x: number, y: number) => {
       if (text.trim()) {
         setSelectedText({ text, nodeId, x, y });
+        // Freeze node in simulation to stop position jitter while selecting
+        if (simulationRef.current) {
+          const simNode = nodesRef.current.find((n: SimulationNode) => n.id === nodeId);
+          if (simNode) {
+            simNode.fx = simNode.x;
+            simNode.fy = simNode.y;
+          }
+        }
       }
     },
     [],
@@ -473,7 +532,7 @@ export default function ChatCanvas({
 
       // Update the force simulation node if simulation is enabled
       if (simulationRef.current) {
-        const simNode = nodesRef.current.find(n => n.id === nodeId);
+        const simNode = nodesRef.current.find((n: SimulationNode) => n.id === nodeId);
         if (simNode) {
           // Fix the node position to prevent simulation from moving it
           simNode.fx = x;
@@ -486,11 +545,11 @@ export default function ChatCanvas({
         }
       }
 
-      const updatedNodes = currentConversation.nodes.map((node) =>
+      const updatedNodes = currentConversation.nodes.map((node: ChatNode) =>
         node.id === nodeId ? { ...node, x, y } : node,
       );
 
-      console.log('Updated nodes:', updatedNodes.find(n => n.id === nodeId));
+      console.log('Updated nodes:', updatedNodes.find((n: ChatNode) => n.id === nodeId));
 
       const newConversation = {
         ...currentConversation,
@@ -513,7 +572,7 @@ export default function ChatCanvas({
     (id: string) => {
       const currentConversation = conversationRef.current;
       if (!currentConversation) return undefined;
-      return currentConversation.nodes.find((node) => node.id === id);
+      return currentConversation.nodes.find((node: ChatNode) => node.id === id);
     },
     [], // No dependencies - uses refs
   );
@@ -521,15 +580,68 @@ export default function ChatCanvas({
   const handleReplyToSelection = useCallback(() => {
     if (!selectedText) return;
 
-    addChildNode(selectedText.nodeId, selectedText.x + 200, selectedText.y);
+    // Build a markdown blockquote of the selected text (limit length to prevent overly large quotes)
+    const MAX_QUOTE_CHARS = 1200;
+    const raw = selectedText.text.length > MAX_QUOTE_CHARS
+      ? selectedText.text.slice(0, MAX_QUOTE_CHARS) + '…'
+      : selectedText.text;
+    const quoted = raw
+      .split(/\r?\n/)
+      .map((line: string) => line.trim() ? `> ${line}` : '>')
+      .join('\n');
+    const initialContent = `${quoted}\n\n`; // Leave space for user prompt continuation
+
+    addChildNode(selectedText.nodeId, selectedText.x + 200, selectedText.y, undefined, initialContent);
     setSelectedText(null);
   }, [selectedText, addChildNode]);
 
   useEffect(() => {
-    const handleGlobalClick = () => setSelectedText(null);
-    document.addEventListener("click", handleGlobalClick);
-    return () => document.removeEventListener("click", handleGlobalClick);
-  }, []);
+    let mouseDownTarget: EventTarget | null = null;
+    const handleMouseDown = (e: MouseEvent) => {
+      mouseDownTarget = e.target;
+      const target = e.target as HTMLElement;
+      if (target.closest('[data-selectable-content="true"]')) {
+        isSelectingRef.current = true;
+      }
+    };
+    const handleMouseUp = () => {
+      // Give browser a tick to finalize selection highlight
+      setTimeout(() => {
+        isSelectingRef.current = false;
+        // Don't clear selectedText just because browser selection is lost
+        // The force simulation can cause DOM changes that clear browser selection
+        // Only clear when user explicitly clicks elsewhere
+      }, 20);
+    };
+    const handleClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.closest('[data-selectable-content="true"]')) return;
+      if (target.closest('[data-reply-button="true"]')) return;
+      const sel = window.getSelection();
+      if (sel && sel.toString().trim()) return; // keep selection
+
+      // Clear selection when clicking outside selectable content or reply button
+      setSelectedText(null);
+      // Release frozen node if any
+      if (simulationRef.current && selectedText?.nodeId) {
+        const simNode = nodesRef.current.find((n: SimulationNode) => n.id === selectedText.nodeId);
+        if (simNode && !fixedNodesRef.current.has(selectedText.nodeId)) {
+          simNode.fx = null;
+          simNode.fy = null;
+          // Nudge simulation slightly to settle others
+          simulationRef.current.alpha(0.3).restart();
+        }
+      }
+    };
+    document.addEventListener('mousedown', handleMouseDown);
+    document.addEventListener('mouseup', handleMouseUp);
+    document.addEventListener('click', handleClick);
+    return () => {
+      document.removeEventListener('mousedown', handleMouseDown);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.removeEventListener('click', handleClick);
+    };
+  }, [selectedText]);
 
   const dotPattern = `radial-gradient(circle, rgba(156, 163, 175, 0.3) 1px, transparent 1px)`;
   const dotSize = 20 * zoom;
@@ -582,13 +694,13 @@ export default function ChatCanvas({
 
             {/* Render connections using force simulation data when available */}
             {linksRef.current.length > 0
-              ? linksRef.current.map((link, index) => {
+              ? linksRef.current.map((link: SimulationLink, index: number) => {
                 const sourceNode = typeof link.source === 'string'
-                  ? nodesRef.current.find(n => n.id === link.source)
-                  : link.source;
+                  ? nodesRef.current.find((n: SimulationNode) => n.id === link.source)
+                  : link.source as SimulationNode;
                 const targetNode = typeof link.target === 'string'
-                  ? nodesRef.current.find(n => n.id === link.target)
-                  : link.target;
+                  ? nodesRef.current.find((n: SimulationNode) => n.id === link.target)
+                  : link.target as SimulationNode;
 
                 if (!sourceNode || !targetNode ||
                   sourceNode.x === undefined || sourceNode.y === undefined ||
@@ -727,15 +839,17 @@ export default function ChatCanvas({
         <div
           className="absolute z-50"
           style={{
-            left: selectedText.x + pan.x,
-            top: selectedText.y + pan.y - 40,
+            // Use viewport based coordinates relative to canvas without re-applying pan/zoom (selection rect already in viewport coords)
+            left: selectedText.x - (canvasRef.current?.getBoundingClientRect().left || 0),
+            top: selectedText.y - (canvasRef.current?.getBoundingClientRect().top || 0) - 40,
           }}
         >
           <button
+            data-reply-button="true"
             onClick={handleReplyToSelection}
-            className="bg-primary text-primary-foreground px-3 py-1 rounded text-sm hover:bg-primary/90"
+            className="bg-primary text-primary-foreground px-3 py-1 rounded text-sm hover:bg-primary/90 shadow"
           >
-            Reply to Selection
+            Reply
           </button>
         </div>
       )}
