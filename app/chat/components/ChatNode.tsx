@@ -221,27 +221,22 @@ export default function ChatNodeComponent({
       isEditing: false
     });
 
-    // Calculate dynamic position for AI response based on prompt card height
-    const responseX = node.x;
-    const cardHeight = calculateCardHeight();
-    const responseY = node.y + cardHeight + 60;
-
     // Create AI response node immediately before starting the stream
     const aiResponseId = `node-${Date.now()}-ai`;
     const aiResponse: ChatNode = {
       id: aiResponseId,
       content: "", // Start empty, will be updated during streaming
       isUser: false,
-      x: responseX,
-      y: responseY,
+      x: node.x, // Position will be calculated by canvas
+      y: node.y, // Position will be calculated by canvas
       parentId: node.id,
       childIds: [],
       model: selectedModel, // Store the model used for this response
       providerId: selectedProviderId, // Store the provider used for this response
     };
 
-    // Add the AI response node immediately
-    propsRef.current.onAddChild(node.id, responseX, responseY, aiResponse);
+    // Add the AI response node immediately (canvas will calculate optimal position)
+    propsRef.current.onAddChild(node.id, node.x, node.y, aiResponse);
 
     try {
       const preferences = getUserPreferences();
@@ -420,13 +415,8 @@ export default function ChatNodeComponent({
   };
 
   const handleAddChild = () => {
-    // Calculate dynamic position for child node based on current card height
-    const cardHeight = calculateCardHeight();
-
-    // Add more spacing between cards to prevent overlap (60px)
-    const childY = node.y + cardHeight + 60;
-
-    propsRef.current.onAddChild(node.id, node.x, childY);
+    // Let the parent canvas calculate the optimal position
+    propsRef.current.onAddChild(node.id, node.x, node.y);
   };
 
   const handleTextSelect = (e: React.MouseEvent) => {
@@ -540,15 +530,17 @@ export default function ChatNodeComponent({
                 >
                   {copied ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
                 </Button>
-                <Button
-                  size="icon"
-                  variant="outline"
-                  className="w-8 h-8 bg-background/90 backdrop-blur-sm"
-                  onClick={() => propsRef.current.onBranch(node.id)} // Use current node prop
-                  title="Branch conversation"
-                >
-                  <GitBranch className="w-4 h-4" />
-                </Button>
+                {node.isUser && (
+                  <Button
+                    size="icon"
+                    variant="outline"
+                    className="w-8 h-8 bg-background/90 backdrop-blur-sm"
+                    onClick={() => propsRef.current.onBranch(node.id)}
+                    title="Branch conversation"
+                  >
+                    <GitBranch className="w-4 h-4" />
+                  </Button>
+                )}
                 <Button
                   size="icon"
                   variant="outline"
