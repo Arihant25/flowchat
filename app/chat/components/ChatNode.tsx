@@ -20,6 +20,7 @@ import MarkdownRenderer from "@/components/ui/markdown-renderer";
 import { getUserPreferences, saveLastUsedProviderAndModel, getLastUsedProviderAndModel, getAllProviderConfigs } from "@/lib/storage";
 import { ChatMessage, StreamingResponse, ProviderConfig } from "@/lib/types";
 import { getModelBorderColor, USER_NODE_BORDER, DEFAULT_AI_NODE_BORDER } from "@/lib/utils";
+import { streamChatCompletionClient, shouldUseClientSideStreaming } from "@/lib/client-ai-providers";
 
 interface ChatNodeComponentProps {
   node: ChatNode;
@@ -253,82 +254,129 @@ export default function ChatNodeComponent({
         throw new Error("Provider configuration not found");
       }
 
-      const requestBody = {
-        message: localContent,
-        conversationHistory: buildConversationHistory(),
-        provider: selectedProviderId.split('_')[0], // Extract provider type from ID
-        model: selectedModel,
-        providerId: selectedProviderId,
-        temperature: preferences.temperature || 0.7,
-        systemPrompt: preferences.systemPrompt || "",
-        providerConfig: providerConfig, // Send the full config including API key
-      };
+      // Build conversation history
+      const conversationHistory = buildConversationHistory();
 
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(requestBody),
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const reader = response.body?.getReader();
-      if (!reader) {
-        throw new Error("Failed to get response reader");
-      }
+      // Check if we should use client-side streaming (for local providers)
+      const useClientSide = shouldUseClientSideStreaming(providerConfig.provider);
 
       let aiContent = "";
       let thinking = "";
       let thinkingTime = 0;
 
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+      if (useClientSide) {
+        // Client-side streaming for local providers (LM Studio, Ollama)
+        try {
+          for await (const chunk of streamChatCompletionClient(
+            [...conversationHistory, { role: "user", content: localContent }],
+            selectedModel,
+            providerConfig,
+            preferences.temperature || 0.7
+          )) {
+            if (chunk.content) {
+              aiContent = chunk.content;
+            }
+            if (chunk.thinking) {
+              thinking = chunk.thinking;
+            }
+            if (chunk.thinkingTime) {
+              thinkingTime = chunk.thinkingTime;
+            }
 
-          const chunk = new TextDecoder().decode(value);
-          const lines = chunk.split("\n").filter(line => line.trim());
+            // Update the AI response node with the streaming content
+            propsRef.current.onUpdateNode(aiResponseId, {
+              content: aiContent,
+              thinking: thinking || undefined,
+              thinkingTime: thinkingTime || undefined,
+            });
 
-          for (const line of lines) {
-            if (line.startsWith("data: ")) {
-              const data = line.slice(6);
-              if (data === "[DONE]") continue;
+            if (chunk.isComplete) {
+              if (chunk.error) {
+                throw new Error(chunk.error);
+              }
+              // Save the successfully used provider and model for future use
+              saveLastUsedProviderAndModel(selectedProviderId, selectedModel);
+              break;
+            }
+          }
+        } catch (clientError) {
+          throw clientError;
+        }
+      } else {
+        // Server-side streaming for cloud providers (OpenAI, Anthropic, Google)
+        const requestBody = {
+          message: localContent,
+          conversationHistory: conversationHistory,
+          provider: selectedProviderId.split('_')[0], // Extract provider type from ID
+          model: selectedModel,
+          providerId: selectedProviderId,
+          temperature: preferences.temperature || 0.7,
+          systemPrompt: preferences.systemPrompt || "",
+          providerConfig: providerConfig, // Send the full config including API key
+        };
 
-              try {
-                const parsed: StreamingResponse = JSON.parse(data);
+        const response = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(requestBody),
+        });
 
-                if (parsed.content) {
-                  aiContent = parsed.content;
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const reader = response.body?.getReader();
+        if (!reader) {
+          throw new Error("Failed to get response reader");
+        }
+
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            const chunk = new TextDecoder().decode(value);
+            const lines = chunk.split("\n").filter(line => line.trim());
+
+            for (const line of lines) {
+              if (line.startsWith("data: ")) {
+                const data = line.slice(6);
+                if (data === "[DONE]") continue;
+
+                try {
+                  const parsed: StreamingResponse = JSON.parse(data);
+
+                  if (parsed.content) {
+                    aiContent = parsed.content;
+                  }
+                  if (parsed.thinking) {
+                    thinking = parsed.thinking;
+                  }
+                  if (parsed.thinkingTime) {
+                    thinkingTime = parsed.thinkingTime;
+                  }
+
+                  // Update the AI response node with the streaming content
+                  propsRef.current.onUpdateNode(aiResponseId, {
+                    content: aiContent,
+                    thinking: thinking || undefined,
+                    thinkingTime: thinkingTime || undefined,
+                  });
+
+                  if (parsed.isComplete) {
+                    // Save the successfully used provider and model for future use
+                    saveLastUsedProviderAndModel(selectedProviderId, selectedModel);
+                    break;
+                  }
+                } catch (e) {
+                  // Ignore JSON parse errors for partial chunks
                 }
-                if (parsed.thinking) {
-                  thinking = parsed.thinking;
-                }
-                if (parsed.thinkingTime) {
-                  thinkingTime = parsed.thinkingTime;
-                }
-
-                // Update the AI response node with the streaming content
-                propsRef.current.onUpdateNode(aiResponseId, {
-                  content: aiContent,
-                  thinking: thinking || undefined,
-                  thinkingTime: thinkingTime || undefined,
-                });
-
-                if (parsed.isComplete) {
-                  // Save the successfully used provider and model for future use
-                  saveLastUsedProviderAndModel(selectedProviderId, selectedModel);
-                  break;
-                }
-              } catch (e) {
-                // Ignore JSON parse errors for partial chunks
               }
             }
           }
+        } finally {
+          reader.releaseLock();
         }
-      } finally {
-        reader.releaseLock();
       }
     } catch (error) {
       console.error("Failed to get AI response:", error);

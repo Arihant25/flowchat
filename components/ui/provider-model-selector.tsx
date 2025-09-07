@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { RefreshCw, Settings } from "lucide-react";
 import { ModelInfo, ProviderConfig } from "@/lib/types";
 import { getAllProviderConfigs } from "@/lib/storage";
+import { fetchModelsForProvider } from "@/lib/model-fetcher";
+import { shouldUseClientSideStreaming } from "@/lib/client-ai-providers";
 
 interface APIProviderConfig {
     id: string;
@@ -118,32 +120,44 @@ export default memo(function ProviderModelSelector({
                 return;
             }
 
-            // Send provider config with API key to the server
-            const response = await fetch(`/api/models`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    providerId,
-                    refresh,
-                    providerConfig: providerConfig
-                })
-            });
+            let models: ModelInfo[] = [];
+
+            // Check if we should use client-side fetching (for local providers)
+            if (shouldUseClientSideStreaming(providerConfig.provider)) {
+                // Client-side fetching for local providers (LM Studio, Ollama)
+                models = await fetchModelsForProvider(providerConfig, !refresh);
+            } else {
+                // Server-side fetching for cloud providers (OpenAI, Anthropic, Google)
+                const response = await fetch(`/api/models`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        providerId,
+                        refresh,
+                        providerConfig: providerConfig
+                    })
+                });
+
+                if (!mounted.current) return;
+
+                if (response.ok) {
+                    const data = await response.json();
+                    models = data.models || [];
+                }
+            }
 
             if (!mounted.current) return;
+            
+            setModels(models);
 
-            if (response.ok) {
-                const data = await response.json();
-                setModels(data.models || []);
-
-                // Auto-select default model only if no model is currently selected
-                if (!selectedModel && data.models?.length > 0 && !refresh) {
-                    const provider = providers.find(p => p.id === providerId);
-                    const defaultModel = provider?.defaultModel || data.models[0]?.id;
-                    if (defaultModel) {
-                        onModelChange(defaultModel);
-                    }
+            // Auto-select default model only if no model is currently selected
+            if (!selectedModel && models.length > 0 && !refresh) {
+                const provider = providers.find(p => p.id === providerId);
+                const defaultModel = provider?.defaultModel || models[0]?.id;
+                if (defaultModel) {
+                    onModelChange(defaultModel);
                 }
             }
         } catch (error) {
