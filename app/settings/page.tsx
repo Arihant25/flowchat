@@ -39,8 +39,6 @@ import {
   initializeDefaultProviders
 } from "@/lib/storage";
 
-type FontFamily = "inter" | "geist" | "jetbrains" | "poppins" | "roboto";
-
 export default function Settings() {
   const [providerConfigs, setProviderConfigs] = useState<ProviderConfig[]>([]);
   const [userPreferences, setUserPreferences] = useState<UserPreferences>();
@@ -496,24 +494,6 @@ export default function Settings() {
                   <CardDescription>Customize the look and feel of Flow Chat</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="font">Font Family</Label>
-                    <Select
-                      value={userPreferences?.fontFamily || "inter"}
-                      onValueChange={(value) => updateUserPreferences({ fontFamily: value as FontFamily })}
-                    >
-                      <SelectTrigger id="font">
-                        <SelectValue placeholder="Select a font" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="inter">Inter</SelectItem>
-                        <SelectItem value="geist">Geist</SelectItem>
-                        <SelectItem value="jetbrains">JetBrains Mono</SelectItem>
-                        <SelectItem value="poppins">Poppins</SelectItem>
-                        <SelectItem value="roboto">Roboto</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
                   <div className="flex items-center justify-between">
                     <div className="space-y-0.5">
                       <Label htmlFor="color-code-nodes">Color Code Nodes</Label>

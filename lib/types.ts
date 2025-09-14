@@ -125,7 +125,6 @@ export interface UserPreferences {
     defaultProvider: string; // Provider config ID
     temperature: number;
     systemPrompt: string;
-    fontFamily: string;
     theme: "light" | "dark" | "system";
     lastUsedProvider: string; // Last used provider config ID
     lastUsedModel: string; // Last used model ID
@@ -136,7 +135,6 @@ export const DEFAULT_USER_PREFERENCES: UserPreferences = {
     defaultProvider: "",
     temperature: 0.7,
     systemPrompt: "",
-    fontFamily: "inter",
     theme: "system",
     lastUsedProvider: "",
     lastUsedModel: "",
