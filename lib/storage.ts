@@ -3,9 +3,11 @@ import {
     ProviderConfig,
     UserPreferences,
     ModelInfo,
+    CachedModels,
     DEFAULT_PROVIDER_CONFIGS,
     DEFAULT_USER_PREFERENCES,
     STORAGE_KEYS,
+    CACHE_EXPIRATION_TIME,
     AIProvider
 } from "./types";
 
@@ -266,10 +268,26 @@ export function getCachedModels(provider: AIProvider): ModelInfo[] {
     try {
         const stored = localStorage.getItem(`${STORAGE_KEYS.CACHED_MODELS}_${provider}`);
         if (stored) {
-            return JSON.parse(stored);
+            const cachedData: CachedModels = JSON.parse(stored);
+
+            // Check if cache is expired
+            const now = Date.now();
+            if (now - cachedData.timestamp < CACHE_EXPIRATION_TIME) {
+                return cachedData.models;
+            } else {
+                // Cache expired, remove it
+                localStorage.removeItem(`${STORAGE_KEYS.CACHED_MODELS}_${provider}`);
+                return [];
+            }
         }
     } catch (error) {
         console.error("Error loading cached models:", error);
+        // Remove corrupted cache
+        try {
+            localStorage.removeItem(`${STORAGE_KEYS.CACHED_MODELS}_${provider}`);
+        } catch (e) {
+            console.error("Error removing corrupted cache:", e);
+        }
     }
 
     return [];
@@ -279,9 +297,67 @@ export function saveCachedModels(provider: AIProvider, models: ModelInfo[]): voi
     if (typeof window === "undefined") return;
 
     try {
-        localStorage.setItem(`${STORAGE_KEYS.CACHED_MODELS}_${provider}`, JSON.stringify(models));
+        const cachedData: CachedModels = {
+            models,
+            timestamp: Date.now(),
+            version: 1
+        };
+        localStorage.setItem(`${STORAGE_KEYS.CACHED_MODELS}_${provider}`, JSON.stringify(cachedData));
     } catch (error) {
         console.error("Error saving cached models:", error);
+    }
+}
+
+// Clear cached models for a specific provider
+export function clearCachedModels(provider: AIProvider): void {
+    if (typeof window === "undefined") return;
+
+    try {
+        localStorage.removeItem(`${STORAGE_KEYS.CACHED_MODELS}_${provider}`);
+    } catch (error) {
+        console.error("Error clearing cached models:", error);
+    }
+}
+
+// Clear all cached models
+export function clearAllCachedModels(): void {
+    if (typeof window === "undefined") return;
+
+    try {
+        const providers: AIProvider[] = ["openai", "anthropic", "google", "ollama", "lmstudio"];
+        providers.forEach(provider => {
+            localStorage.removeItem(`${STORAGE_KEYS.CACHED_MODELS}_${provider}`);
+        });
+    } catch (error) {
+        console.error("Error clearing all cached models:", error);
+    }
+}
+
+// Check if any cached models are expired and clean them up
+export function cleanupExpiredCache(): void {
+    if (typeof window === "undefined") return;
+
+    try {
+        const providers: AIProvider[] = ["openai", "anthropic", "google", "ollama", "lmstudio"];
+        const now = Date.now();
+
+        providers.forEach(provider => {
+            const stored = localStorage.getItem(`${STORAGE_KEYS.CACHED_MODELS}_${provider}`);
+            if (stored) {
+                try {
+                    const cachedData: CachedModels = JSON.parse(stored);
+                    if (now - cachedData.timestamp >= CACHE_EXPIRATION_TIME) {
+                        localStorage.removeItem(`${STORAGE_KEYS.CACHED_MODELS}_${provider}`);
+                        console.log(`Cleared expired cache for provider: ${provider}`);
+                    }
+                } catch (e) {
+                    // Remove corrupted cache
+                    localStorage.removeItem(`${STORAGE_KEYS.CACHED_MODELS}_${provider}`);
+                }
+            }
+        });
+    } catch (error) {
+        console.error("Error cleaning up expired cache:", error);
     }
 }
 

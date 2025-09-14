@@ -15,6 +15,8 @@ import {
   X
 } from "lucide-react";
 import Link from "next/link";
+import { motion, AnimatePresence } from "framer-motion";
+import { staggerContainer, staggerItem, hoverVariants, easings } from "@/lib/animations";
 
 interface ChatSidebarProps {
   conversations: ChatConversation[];
@@ -82,143 +84,248 @@ export default function ChatSidebar({
   };
 
   return (
-    <div
-      className={`bg-background border-r transition-all duration-300 flex flex-col ${collapsed ? "w-16" : "w-80"
+    <motion.div
+      className={`bg-background border-r transition-all duration-300 flex flex-col h-screen overflow-x-hidden ${collapsed ? "w-16" : "w-80"
         } group hover:w-80`}
       onMouseEnter={() => !collapsed && undefined}
+      layout
+      transition={easings.smooth}
     >
       {/* Header */}
-      <div className="p-4 border-b flex items-center justify-between">
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onToggleCollapse}
-          className="flex-shrink-0"
+      <motion.div
+        className="p-4 border-b flex items-center justify-between flex-shrink-0"
+        layout
+      >
+        <motion.div
+          whileHover={hoverVariants.scale.hover}
+          whileTap={{ scale: 0.9 }}
+          transition={easings.fast}
         >
-          <Menu className="h-4 w-4" />
-        </Button>
-
-        <div className={`transition-all duration-300 ${collapsed ? "w-0 opacity-0 overflow-hidden group-hover:w-auto group-hover:opacity-100" : "w-auto opacity-100"
-          }`}>
           <Button
-            onClick={onNewConversation}
-            className="flex items-center gap-2"
-            size="sm"
+            variant="ghost"
+            size="icon"
+            onClick={onToggleCollapse}
+            className="flex-shrink-0"
           >
-            <Plus className="h-4 w-4" />
-            <span className="whitespace-nowrap">New Chat</span>
+            <Menu className="h-4 w-4" />
           </Button>
-        </div>
-      </div>
+        </motion.div>
+
+        {/* New Chat button - only show when not collapsed or on hover when collapsed */}
+        {!collapsed && (
+          <motion.div
+            whileHover={hoverVariants.scale.hover}
+            whileTap={{ scale: 0.95 }}
+            transition={easings.fast}
+          >
+            <Button
+              onClick={onNewConversation}
+              className="flex items-center gap-2"
+              size="sm"
+            >
+              <Plus className="h-4 w-4" />
+              <span className="whitespace-nowrap">New Chat</span>
+            </Button>
+          </motion.div>
+        )}
+
+        {/* Show on hover when collapsed */}
+        {collapsed && (
+          <div className="hidden group-hover:block">
+            <motion.div
+              whileHover={hoverVariants.scale.hover}
+              whileTap={{ scale: 0.95 }}
+              transition={easings.fast}
+            >
+              <Button
+                onClick={onNewConversation}
+                className="flex items-center gap-2"
+                size="sm"
+              >
+                <Plus className="h-4 w-4" />
+                <span className="whitespace-nowrap">New Chat</span>
+              </Button>
+            </motion.div>
+          </div>
+        )}
+      </motion.div>
 
       {/* Conversations List */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="p-2 space-y-1">
-          {conversations.map((conversation) => (
-            <Card
-              key={conversation.id}
-              className={`cursor-pointer transition-colors hover:bg-accent ${currentConversation?.id === conversation.id ? "bg-accent" : ""
-                } ${collapsed ? "group-hover:block" : "block"}`}
-              onClick={() => !editingId && onSelectConversation(conversation)}
-            >
-              <CardContent className="p-3">
-                <div className={`transition-all duration-300 ${collapsed ? "hidden group-hover:block" : "block"
-                  }`}>
-                  {editingId === conversation.id ? (
-                    <div className="space-y-2">
-                      <Input
-                        value={editingTitle}
-                        onChange={(e) => setEditingTitle(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") saveEdit();
-                          if (e.key === "Escape") cancelEdit();
-                        }}
-                        className="text-sm"
-                        autoFocus
-                      />
-                      <div className="flex justify-end gap-1">
-                        <Button size="icon" variant="ghost" onClick={saveEdit} className="h-6 w-6">
-                          <Check className="h-3 w-3" />
-                        </Button>
-                        <Button size="icon" variant="ghost" onClick={cancelEdit} className="h-6 w-6">
-                          <X className="h-3 w-3" />
-                        </Button>
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="flex items-start justify-between group/item">
-                        <div className="flex-1 min-w-0">
-                          <h4 className="font-medium text-sm truncate mb-1">
-                            {conversation.title}
-                          </h4>
-                          <p className="text-xs text-muted-foreground truncate mb-2">
-                            {getConversationPreview(conversation)}
-                          </p>
-                          <div className="text-xs text-muted-foreground">
-                            {formatDate(conversation.lastModified)}
+      <div className="flex-1 overflow-y-auto overflow-x-hidden min-h-0 max-h-full">
+        <motion.div
+          className="p-2 space-y-1 h-full overflow-x-hidden"
+          variants={staggerContainer}
+          initial="hidden"
+          animate="visible"
+        >
+          <AnimatePresence>
+            {conversations.map((conversation, index) => (
+              <motion.div
+                key={conversation.id}
+                variants={staggerItem}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                layout
+                transition={easings.spring}
+                custom={index}
+              >
+                <motion.div
+                  whileHover={hoverVariants.lift.hover}
+                  whileTap={{ scale: 0.98 }}
+                  transition={easings.fast}
+                >
+                  <Card
+                    className={`cursor-pointer transition-colors hover:bg-accent ${currentConversation?.id === conversation.id ? "bg-accent" : ""
+                      } ${collapsed ? "group-hover:block" : "block"}`}
+                    onClick={() => !editingId && onSelectConversation(conversation)}
+                  >
+                    <CardContent className="p-3">
+                      <div className={`transition-all duration-300 ${collapsed ? "hidden group-hover:block" : "block"
+                        }`}>
+                        {editingId === conversation.id ? (
+                          <div className="space-y-2">
+                            <Input
+                              value={editingTitle}
+                              onChange={(e) => setEditingTitle(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") saveEdit();
+                                if (e.key === "Escape") cancelEdit();
+                              }}
+                              className="text-sm"
+                              autoFocus
+                            />
+                            <div className="flex justify-end gap-1">
+                              <Button size="icon" variant="ghost" onClick={saveEdit} className="h-6 w-6">
+                                <Check className="h-3 w-3" />
+                              </Button>
+                              <Button size="icon" variant="ghost" onClick={cancelEdit} className="h-6 w-6">
+                                <X className="h-3 w-3" />
+                              </Button>
+                            </div>
                           </div>
-                        </div>
-                        <div className="flex gap-1 opacity-0 group-hover/item:opacity-100 transition-opacity">
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              startEditing(conversation);
-                            }}
-                            className="h-6 w-6"
-                          >
-                            <Edit3 className="h-3 w-3" />
-                          </Button>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onDeleteConversation(conversation.id);
-                            }}
-                            className="h-6 w-6 text-destructive hover:text-destructive"
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </Button>
-                        </div>
+                        ) : (
+                          <>
+                            <div className="flex items-start justify-between group/item">
+                              <div className="flex-1 min-w-0">
+                                <h4 className="font-medium text-sm truncate mb-1">
+                                  {conversation.title}
+                                </h4>
+                                <p className="text-xs text-muted-foreground truncate mb-2">
+                                  {getConversationPreview(conversation)}
+                                </p>
+                                <div className="text-xs text-muted-foreground">
+                                  {formatDate(conversation.lastModified)}
+                                </div>
+                              </div>
+                              <div className="flex gap-1 opacity-0 group-hover/item:opacity-100 transition-opacity">
+                                <motion.div
+                                  whileHover={{ scale: 1.1 }}
+                                  whileTap={{ scale: 0.9 }}
+                                >
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      startEditing(conversation);
+                                    }}
+                                    className="h-6 w-6"
+                                  >
+                                    <Edit3 className="h-3 w-3" />
+                                  </Button>
+                                </motion.div>
+                                <motion.div
+                                  whileHover={{ scale: 1.1 }}
+                                  whileTap={{ scale: 0.9 }}
+                                >
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onDeleteConversation(conversation.id);
+                                    }}
+                                    className="h-6 w-6 text-destructive hover:text-destructive"
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                  </Button>
+                                </motion.div>
+                              </div>
+                            </div>
+                          </>
+                        )}
                       </div>
-                    </>
-                  )}
-                </div>
 
-                {/* Collapsed view - just show a dot for each conversation */}
-                <div className={`${collapsed ? "block group-hover:hidden" : "hidden"}`}>
-                  <div className={`w-2 h-2 rounded-full mx-auto ${currentConversation?.id === conversation.id ? "bg-primary" : "bg-muted-foreground"
-                    }`} />
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+                      {/* Collapsed view - just show a dot for each conversation */}
+                      <div className={`${collapsed ? "block group-hover:hidden" : "hidden"}`}>
+                        <div className={`w-2 h-2 rounded-full mx-auto ${currentConversation?.id === conversation.id ? "bg-primary" : "bg-muted-foreground"
+                          }`} />
+                      </div>
+                    </CardContent>
+                  </Card>
+                </motion.div>
+              </motion.div>
+            ))}
+          </AnimatePresence>
+        </motion.div>
       </div>
 
       {/* Footer */}
-      <div className="p-4 border-t">
-        <div className={`transition-all duration-300 ${collapsed ? "hidden group-hover:block" : "block"
-          }`}>
-          <Button asChild variant="ghost" size="sm" className="w-full justify-start">
-            <Link href="/settings" className="flex items-center gap-2">
-              <Settings className="h-4 w-4" />
-              <span>Settings</span>
-            </Link>
-          </Button>
-        </div>
+      <motion.div
+        className="p-4 border-t flex-shrink-0"
+        layout
+      >
+        {/* Expanded state */}
+        {!collapsed && (
+          <motion.div
+            initial={{ opacity: 1 }}
+            animate={{ opacity: 1 }}
+            transition={easings.smooth}
+          >
+            <motion.div
+              whileHover={hoverVariants.lift.hover}
+              transition={easings.fast}
+            >
+              <Button asChild variant="ghost" size="sm" className="w-full justify-start">
+                <Link href="/settings" className="flex items-center gap-2">
+                  <Settings className="h-4 w-4" />
+                  <span>Settings</span>
+                </Link>
+              </Button>
+            </motion.div>
+          </motion.div>
+        )}
 
-        <div className={`${collapsed ? "block group-hover:hidden" : "hidden"}`}>
-          <Button asChild variant="ghost" size="icon" className="w-full">
-            <Link href="/settings">
-              <Settings className="h-4 w-4" />
-            </Link>
-          </Button>
-        </div>
-      </div>
-    </div>
+        {/* Collapsed state */}
+        {collapsed && (
+          <>
+            {/* Show full button on hover */}
+            <div className="hidden group-hover:block w-full">
+              <motion.div
+                whileHover={hoverVariants.lift.hover}
+                transition={easings.fast}
+              >
+                <Button asChild variant="ghost" size="sm" className="w-full justify-start">
+                  <Link href="/settings" className="flex items-center gap-2">
+                    <Settings className="h-4 w-4" />
+                    <span>Settings</span>
+                  </Link>
+                </Button>
+              </motion.div>
+            </div>
+
+            {/* Show icon only when not hovering */}
+            <div className="block group-hover:hidden w-full">
+              <Button asChild variant="ghost" size="icon" className="w-full">
+                <Link href="/settings">
+                  <Settings className="h-4 w-4" />
+                </Link>
+              </Button>
+            </div>
+          </>
+        )}
+      </motion.div>
+    </motion.div>
   );
 }

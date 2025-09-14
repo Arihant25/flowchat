@@ -13,22 +13,6 @@ interface ThinkingIndicatorProps {
 
 export default function ThinkingIndicator({ thinking, thinkingTime, isThinking }: ThinkingIndicatorProps) {
     const [isExpanded, setIsExpanded] = useState(false);
-    const [currentTime, setCurrentTime] = useState(0);
-
-    useEffect(() => {
-        let interval: NodeJS.Timeout;
-        if (isThinking) {
-            interval = setInterval(() => {
-                setCurrentTime(prev => prev + 1);
-            }, 1000);
-        } else {
-            setCurrentTime(thinkingTime || 0);
-        }
-
-        return () => {
-            if (interval) clearInterval(interval);
-        };
-    }, [isThinking, thinkingTime]);
 
     // Auto-expand when thinking to show real-time thinking output
     useEffect(() => {
@@ -50,6 +34,9 @@ export default function ThinkingIndicator({ thinking, thinkingTime, isThinking }
         return `${mins}m ${secs}s`;
     };
 
+    // Use the thinkingTime from AI providers, which now correctly tracks cumulative thinking time
+    const displayTime = thinkingTime || 0;
+
     return (
         <Card className={`mb-2 border-gray-200 dark:border-gray-700 ${isThinking ? 'bg-blue-50 dark:bg-gray-800 border-blue-200 dark:border-blue-800' : 'bg-gray-50 dark:bg-gray-800'
             }`}>
@@ -65,8 +52,8 @@ export default function ThinkingIndicator({ thinking, thinkingTime, isThinking }
                         <Brain className="w-4 h-4" />
                         <span>
                             {isThinking
-                                ? `Thinking for ${formatTime(currentTime)}...`
-                                : `Thought for ${formatTime(currentTime)}`
+                                ? `Thinking for ${formatTime(displayTime)}...`
+                                : `Thought for ${formatTime(displayTime)}`
                             }
                         </span>
                     </div>

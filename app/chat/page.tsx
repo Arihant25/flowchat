@@ -15,6 +15,8 @@ import { Button } from "@/components/ui/button";
 import { Maximize2, Minimize2 } from "lucide-react";
 import ProviderSetupDialog from "@/components/ui/provider-setup-dialog";
 import { ProviderConfig } from "@/lib/types";
+import { motion, AnimatePresence } from "framer-motion";
+import { sidebarVariants, fadeVariants, easings } from "@/lib/animations";
 
 export interface ChatNode {
   id: string;
@@ -142,6 +144,14 @@ export default function ChatPage() {
 
       setConversations((prev) => {
         let modified = false;
+        let shouldMoveToTop = false;
+
+        // Check if this is a new message being added (increase in node count)
+        const existingConv = prev.find(conv => conv.id === updatedConversation.id);
+        if (existingConv && updatedConversation.nodes.length > existingConv.nodes.length) {
+          shouldMoveToTop = true;
+        }
+
         const next = prev.map((conv) => {
           if (conv.id === updatedConversation.id) {
             // Shallow compare to avoid unnecessary array recreation
@@ -152,6 +162,15 @@ export default function ChatPage() {
           }
           return conv;
         });
+
+        if (modified && shouldMoveToTop) {
+          // Move the updated conversation to the top of the list
+          const updatedConv = next.find(conv => conv.id === updatedConversation.id);
+          if (updatedConv) {
+            return [updatedConv, ...next.filter(conv => conv.id !== updatedConversation.id)];
+          }
+        }
+
         return modified ? next : prev;
       });
       // persist
@@ -262,47 +281,92 @@ export default function ChatPage() {
   }, []);
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden">
+    <motion.div
+      className="h-screen flex flex-col overflow-hidden"
+      variants={fadeVariants}
+      initial="hidden"
+      animate="visible"
+      exit="exit"
+      transition={easings.smooth}
+    >
       <div className="flex-1 flex relative">
-        {!isFullscreen && (
-          <ChatSidebar
-            conversations={conversations}
-            currentConversation={currentConversation}
-            onNewConversation={createNewConversation}
-            onSelectConversation={selectConversation}
-            onDeleteConversation={deleteConversation}
-            onRenameConversation={renameConversation}
-            collapsed={sidebarCollapsed}
-            onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
-          />
-        )}
+        <AnimatePresence>
+          {!isFullscreen && (
+            <motion.div
+              variants={sidebarVariants}
+              initial="closed"
+              animate="open"
+              exit="closed"
+              transition={easings.smooth}
+            >
+              <ChatSidebar
+                conversations={conversations}
+                currentConversation={currentConversation}
+                onNewConversation={createNewConversation}
+                onSelectConversation={selectConversation}
+                onDeleteConversation={deleteConversation}
+                onRenameConversation={renameConversation}
+                collapsed={sidebarCollapsed}
+                onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
 
-        <div className="flex-1 relative">
+        <motion.div
+          className="flex-1 relative"
+          layout
+          transition={easings.smooth}
+        >
           <ChatCanvas
             conversation={currentConversation}
             onUpdateConversation={updateConversation}
             onCreateNewConversation={createNewConversation}
           />
 
-          <Button
-            variant="outline"
-            size="icon"
+          <motion.div
             className="absolute top-4 right-4 z-10"
-            onClick={toggleFullscreen}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            transition={easings.fast}
           >
-            {isFullscreen ? (
-              <Minimize2 className="h-4 w-4" />
-            ) : (
-              <Maximize2 className="h-4 w-4" />
-            )}
-          </Button>
-        </div>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={toggleFullscreen}
+            >
+              <AnimatePresence mode="wait">
+                {isFullscreen ? (
+                  <motion.div
+                    key="minimize"
+                    initial={{ rotate: 180, scale: 0 }}
+                    animate={{ rotate: 0, scale: 1 }}
+                    exit={{ rotate: -180, scale: 0 }}
+                    transition={easings.spring}
+                  >
+                    <Minimize2 className="h-4 w-4" />
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    key="maximize"
+                    initial={{ rotate: -180, scale: 0 }}
+                    animate={{ rotate: 0, scale: 1 }}
+                    exit={{ rotate: 180, scale: 0 }}
+                    transition={easings.spring}
+                  >
+                    <Maximize2 className="h-4 w-4" />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </Button>
+          </motion.div>
+        </motion.div>
       </div>
       <ProviderSetupDialog
         isOpen={isSetupDialogOpen}
         onClose={() => setIsSetupDialogOpen(false)}
         onProviderConfigured={handleProviderConfigured}
       />
-    </div>
+    </motion.div>
   );
 }

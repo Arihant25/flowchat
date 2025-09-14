@@ -36,8 +36,8 @@ export default function ChatCanvas({
   // Node positioning constants
   const NODE_WIDTH = 384;
   const NODE_HEIGHT = 120; // Minimum height
-  const VERTICAL_SPACING = 80;
-  const HORIZONTAL_SPACING = 150;
+  const VERTICAL_SPACING = 100;
+  const HORIZONTAL_SPACING = 200;
 
   // Estimate the actual height of a node based on its content
   const estimateNodeHeight = useCallback((node: ChatNode): number => {
@@ -624,7 +624,10 @@ export default function ChatCanvas({
         className="absolute inset-0"
       >
         {!conversation || conversation.nodes.length === 0 ? (
-          <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-muted-foreground text-xl pointer-events-none" data-canvas="true">
+          <div
+            className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-muted-foreground text-xl pointer-events-none"
+            data-canvas="true"
+          >
             Double-click anywhere to start chatting!
           </div>
         ) : (
@@ -791,7 +794,6 @@ export default function ChatCanvas({
                       strokeWidth={"2"}
                       fill="none"
                       markerEnd={`url(#arrowhead-${node.id}-${childId})`}
-                      className="transition-all duration-200"
                     />
                   </svg>
                 );

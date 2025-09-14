@@ -9,6 +9,8 @@ import { ArrowLeft, CheckCircle } from "lucide-react";
 import { AIProvider, ProviderConfig, DEFAULT_PROVIDER_CONFIGS } from "@/lib/types";
 import { putProviderConfig, getAllProviderConfigs } from "@/lib/storage";
 import { useToast } from "@/lib/use-toast";
+import { motion, AnimatePresence } from "framer-motion";
+import { modalVariants, staggerContainer, staggerItem, hoverVariants, easings } from "@/lib/animations";
 
 interface ProviderSetupDialogProps {
     isOpen: boolean;

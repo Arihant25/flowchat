@@ -136,12 +136,17 @@ export async function* streamAnthropic(
         let thinking = "";
         let isThinking = false;
         let thinkingStartTime: number | null = null;
+        let cumulativeThinkingTime = 0;
 
         for await (const chunk of stream) {
             if (chunk.type === "content_block_start") {
                 if (chunk.content_block.type === "text") {
                     // Regular content block
+                    if (isThinking && thinkingStartTime) {
+                        cumulativeThinkingTime += Math.floor((Date.now() - thinkingStartTime) / 1000);
+                    }
                     isThinking = false;
+                    thinkingStartTime = null;
                 }
             } else if (chunk.type === "content_block_delta") {
                 if (chunk.delta.type === "text_delta") {
@@ -149,13 +154,21 @@ export async function* streamAnthropic(
 
                     // Check for thinking tags
                     if (text.includes("<think>")) {
+                        if (isThinking && thinkingStartTime) {
+                            // End previous thinking period
+                            cumulativeThinkingTime += Math.floor((Date.now() - thinkingStartTime) / 1000);
+                        }
                         isThinking = true;
                         thinkingStartTime = Date.now();
                         const parts = text.split("<think>");
                         content += parts[0];
                         thinking += parts[1] || "";
                     } else if (text.includes("</think>")) {
+                        if (isThinking && thinkingStartTime) {
+                            cumulativeThinkingTime += Math.floor((Date.now() - thinkingStartTime) / 1000);
+                        }
                         isThinking = false;
+                        thinkingStartTime = null;
                         const parts = text.split("</think>");
                         thinking += parts[0] || "";
                         content += parts[1] || "";
@@ -165,15 +178,24 @@ export async function* streamAnthropic(
                         content += text;
                     }
 
+                    const currentThinkingTime = isThinking && thinkingStartTime
+                        ? cumulativeThinkingTime + Math.floor((Date.now() - thinkingStartTime) / 1000)
+                        : cumulativeThinkingTime;
+
                     yield {
                         content,
                         thinking: thinking || undefined,
                         isThinking,
                         isComplete: false,
-                        thinkingTime: thinkingStartTime ? Math.floor((Date.now() - thinkingStartTime) / 1000) : undefined,
+                        thinkingTime: currentThinkingTime > 0 ? currentThinkingTime : undefined,
                     };
                 }
             }
+        }
+
+        // Final yield for Anthropic
+        if (isThinking && thinkingStartTime) {
+            cumulativeThinkingTime += Math.floor((Date.now() - thinkingStartTime) / 1000);
         }
 
         yield {
@@ -181,7 +203,7 @@ export async function* streamAnthropic(
             thinking: thinking || undefined,
             isThinking: false,
             isComplete: true,
-            thinkingTime: thinkingStartTime ? Math.floor((Date.now() - thinkingStartTime) / 1000) : undefined,
+            thinkingTime: cumulativeThinkingTime > 0 ? cumulativeThinkingTime : undefined,
         };
     } catch (error: any) {
         yield {
@@ -237,19 +259,28 @@ export async function* streamGemini(
         let thinking = "";
         let isThinking = false;
         let thinkingStartTime: number | null = null;
+        let cumulativeThinkingTime = 0;
 
         for await (const chunk of result.stream) {
             const text = chunk.text() || "";
 
             // Check for thinking tags
             if (text.includes("<think>")) {
+                if (isThinking && thinkingStartTime) {
+                    // End previous thinking period
+                    cumulativeThinkingTime += Math.floor((Date.now() - thinkingStartTime) / 1000);
+                }
                 isThinking = true;
                 thinkingStartTime = Date.now();
                 const parts = text.split("<think>");
                 content += parts[0];
                 thinking += parts[1] || "";
             } else if (text.includes("</think>")) {
+                if (isThinking && thinkingStartTime) {
+                    cumulativeThinkingTime += Math.floor((Date.now() - thinkingStartTime) / 1000);
+                }
                 isThinking = false;
+                thinkingStartTime = null;
                 const parts = text.split("</think>");
                 thinking += parts[0] || "";
                 content += parts[1] || "";
@@ -259,13 +290,22 @@ export async function* streamGemini(
                 content += text;
             }
 
+            const currentThinkingTime = isThinking && thinkingStartTime
+                ? cumulativeThinkingTime + Math.floor((Date.now() - thinkingStartTime) / 1000)
+                : cumulativeThinkingTime;
+
             yield {
                 content,
                 thinking: thinking || undefined,
                 isThinking,
                 isComplete: false,
-                thinkingTime: thinkingStartTime ? Math.floor((Date.now() - thinkingStartTime) / 1000) : undefined,
+                thinkingTime: currentThinkingTime > 0 ? currentThinkingTime : undefined,
             };
+        }
+
+        // Final yield for Gemini
+        if (isThinking && thinkingStartTime) {
+            cumulativeThinkingTime += Math.floor((Date.now() - thinkingStartTime) / 1000);
         }
 
         yield {
@@ -273,7 +313,7 @@ export async function* streamGemini(
             thinking: thinking || undefined,
             isThinking: false,
             isComplete: true,
-            thinkingTime: thinkingStartTime ? Math.floor((Date.now() - thinkingStartTime) / 1000) : undefined,
+            thinkingTime: cumulativeThinkingTime > 0 ? cumulativeThinkingTime : undefined,
         };
     } catch (error: any) {
         yield {
@@ -324,6 +364,7 @@ export async function* streamOllama(
         let thinking = "";
         let isThinking = false;
         let thinkingStartTime: number | null = null;
+        let cumulativeThinkingTime = 0;
 
         try {
             while (true) {
@@ -341,13 +382,21 @@ export async function* streamOllama(
 
                             // Check for thinking tags
                             if (text.includes("<think>")) {
+                                if (isThinking && thinkingStartTime) {
+                                    // End previous thinking period
+                                    cumulativeThinkingTime += Math.floor((Date.now() - thinkingStartTime) / 1000);
+                                }
                                 isThinking = true;
                                 thinkingStartTime = Date.now();
                                 const parts = text.split("<think>");
                                 content += parts[0];
                                 thinking += parts[1] || "";
                             } else if (text.includes("</think>")) {
+                                if (isThinking && thinkingStartTime) {
+                                    cumulativeThinkingTime += Math.floor((Date.now() - thinkingStartTime) / 1000);
+                                }
                                 isThinking = false;
+                                thinkingStartTime = null;
                                 const parts = text.split("</think>");
                                 thinking += parts[0] || "";
                                 content += parts[1] || "";
@@ -357,12 +406,16 @@ export async function* streamOllama(
                                 content += text;
                             }
 
+                            const currentThinkingTime = isThinking && thinkingStartTime
+                                ? cumulativeThinkingTime + Math.floor((Date.now() - thinkingStartTime) / 1000)
+                                : cumulativeThinkingTime;
+
                             yield {
                                 content,
                                 thinking: thinking || undefined,
                                 isThinking,
                                 isComplete: data.done || false,
-                                thinkingTime: thinkingStartTime ? Math.floor((Date.now() - thinkingStartTime) / 1000) : undefined,
+                                thinkingTime: currentThinkingTime > 0 ? currentThinkingTime : undefined,
                             };
                         }
                     } catch (e) {
@@ -374,12 +427,17 @@ export async function* streamOllama(
             reader.releaseLock();
         }
 
+        // Final yield for Ollama
+        if (isThinking && thinkingStartTime) {
+            cumulativeThinkingTime += Math.floor((Date.now() - thinkingStartTime) / 1000);
+        }
+
         yield {
             content,
             thinking: thinking || undefined,
             isThinking: false,
             isComplete: true,
-            thinkingTime: thinkingStartTime ? Math.floor((Date.now() - thinkingStartTime) / 1000) : undefined,
+            thinkingTime: cumulativeThinkingTime > 0 ? cumulativeThinkingTime : undefined,
         };
     } catch (error: any) {
         yield {
@@ -430,6 +488,7 @@ export async function* streamLMStudio(
         let thinking = "";
         let isThinking = false;
         let thinkingStartTime: number | null = null;
+        let cumulativeThinkingTime = 0;
 
         try {
             while (true) {
@@ -450,13 +509,21 @@ export async function* streamLMStudio(
                         if (delta) {
                             // Check for thinking tags
                             if (delta.includes("<think>")) {
+                                if (isThinking && thinkingStartTime) {
+                                    // End previous thinking period
+                                    cumulativeThinkingTime += Math.floor((Date.now() - thinkingStartTime) / 1000);
+                                }
                                 isThinking = true;
                                 thinkingStartTime = Date.now();
                                 const parts = delta.split("<think>");
                                 content += parts[0];
                                 thinking += parts[1] || "";
                             } else if (delta.includes("</think>")) {
+                                if (isThinking && thinkingStartTime) {
+                                    cumulativeThinkingTime += Math.floor((Date.now() - thinkingStartTime) / 1000);
+                                }
                                 isThinking = false;
+                                thinkingStartTime = null;
                                 const parts = delta.split("</think>");
                                 thinking += parts[0] || "";
                                 content += parts[1] || "";
@@ -466,12 +533,16 @@ export async function* streamLMStudio(
                                 content += delta;
                             }
 
+                            const currentThinkingTime = isThinking && thinkingStartTime
+                                ? cumulativeThinkingTime + Math.floor((Date.now() - thinkingStartTime) / 1000)
+                                : cumulativeThinkingTime;
+
                             yield {
                                 content,
                                 thinking: thinking || undefined,
                                 isThinking,
                                 isComplete: false,
-                                thinkingTime: thinkingStartTime ? Math.floor((Date.now() - thinkingStartTime) / 1000) : undefined,
+                                thinkingTime: currentThinkingTime > 0 ? currentThinkingTime : undefined,
                             };
                         }
                     } catch (e) {
@@ -483,12 +554,17 @@ export async function* streamLMStudio(
             reader.releaseLock();
         }
 
+        // Final yield for LM Studio
+        if (isThinking && thinkingStartTime) {
+            cumulativeThinkingTime += Math.floor((Date.now() - thinkingStartTime) / 1000);
+        }
+
         yield {
             content,
             thinking: thinking || undefined,
             isThinking: false,
             isComplete: true,
-            thinkingTime: thinkingStartTime ? Math.floor((Date.now() - thinkingStartTime) / 1000) : undefined,
+            thinkingTime: cumulativeThinkingTime > 0 ? cumulativeThinkingTime : undefined,
         };
     } catch (error: any) {
         yield {

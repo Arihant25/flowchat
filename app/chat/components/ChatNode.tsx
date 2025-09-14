@@ -53,7 +53,6 @@ export default function ChatNodeComponent({
 }: ChatNodeComponentProps) {
   const [localContent, setLocalContent] = useState(node.content);
   const [isLocalEditing, setIsLocalEditing] = useState(node.isEditing);
-  const [isHovered, setIsHovered] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [dontAskAgain, setDontAskAgain] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -505,57 +504,53 @@ export default function ChatNodeComponent({
       >
         <Card
           ref={cardRef}
-          className={`chat-node-card min-w-[32rem] max-w-[48rem] transition-all duration-200 border-2 ${nodeBorderColor} ${isHovered ? "shadow-lg" : "shadow-md"} ${isDragging ? "shadow-2xl ring-2 ring-blue-400 ring-opacity-50 scale-95" : ""} cursor-grab active:cursor-grabbing`}
-          onMouseEnter={() => setIsHovered(true)}
-          onMouseLeave={() => setIsHovered(false)}
+          className={`chat-node-card min-w-[32rem] max-w-[48rem] transition-all duration-200 border-2 ${nodeBorderColor} shadow-md ${isDragging ? "shadow-2xl ring-2 ring-blue-400 ring-opacity-50 scale-95" : ""} cursor-grab active:cursor-grabbing`}
           onMouseDown={handleMouseDown}
           style={{
             animation: isDeleting ? "pop-out 0.3s ease-in-out forwards" : undefined,
           }}
         >
           <CardContent className="p-4 relative">
-            {isHovered && (
-              <div className="absolute -top-2 right-2 flex gap-1 z-10">
+            <div className="absolute -top-2 right-2 flex gap-1 z-10">
+              <Button
+                size="icon"
+                variant="outline"
+                className="w-8 h-8 bg-background/90 backdrop-blur-sm"
+                onClick={async (e: React.MouseEvent<HTMLButtonElement>) => {
+                  e.stopPropagation();
+                  try {
+                    await navigator.clipboard.writeText(node.content || "");
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 1500);
+                  } catch (err) {
+                    console.warn('Copy failed', err);
+                  }
+                }}
+                title="Copy content"
+              >
+                {copied ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+              </Button>
+              {node.isUser && (
                 <Button
                   size="icon"
                   variant="outline"
                   className="w-8 h-8 bg-background/90 backdrop-blur-sm"
-                  onClick={async (e: React.MouseEvent<HTMLButtonElement>) => {
-                    e.stopPropagation();
-                    try {
-                      await navigator.clipboard.writeText(node.content || "");
-                      setCopied(true);
-                      setTimeout(() => setCopied(false), 1500);
-                    } catch (err) {
-                      console.warn('Copy failed', err);
-                    }
-                  }}
-                  title="Copy content"
+                  onClick={() => propsRef.current.onBranch(node.id)}
+                  title="Branch conversation"
                 >
-                  {copied ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+                  <GitBranch className="w-4 h-4" />
                 </Button>
-                {node.isUser && (
-                  <Button
-                    size="icon"
-                    variant="outline"
-                    className="w-8 h-8 bg-background/90 backdrop-blur-sm"
-                    onClick={() => propsRef.current.onBranch(node.id)}
-                    title="Branch conversation"
-                  >
-                    <GitBranch className="w-4 h-4" />
-                  </Button>
-                )}
-                <Button
-                  size="icon"
-                  variant="outline"
-                  className="w-8 h-8 bg-background/90 backdrop-blur-sm"
-                  onClick={handleDelete}
-                  title="Delete node"
-                >
-                  <X className="w-4 h-4" />
-                </Button>
-              </div>
-            )}
+              )}
+              <Button
+                size="icon"
+                variant="outline"
+                className="w-8 h-8 bg-background/90 backdrop-blur-sm"
+                onClick={handleDelete}
+                title="Delete node"
+              >
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
 
             <div className="text-xs mb-2 text-muted-foreground">
               {node.isUser ? "You" : `${colorCodeNodes && node.model ? ` ${node.model}` : ""}`}
@@ -640,7 +635,7 @@ export default function ChatNodeComponent({
               </div>
             )}
 
-            {isHovered && !isLocalEditing && !node.isUser && (
+            {!isLocalEditing && !node.isUser && (
               <Button
                 size="sm"
                 variant="ghost"

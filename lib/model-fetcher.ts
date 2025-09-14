@@ -1,6 +1,6 @@
 // Model fetching functionality for AI providers
 import { AIProvider, ModelInfo, ProviderConfig, DEFAULT_MODELS } from "./types";
-import { getCachedModels, saveCachedModels } from "./storage";
+import { getCachedModels, saveCachedModels, clearCachedModels } from "./storage";
 
 // Fetch models from OpenAI API
 export async function fetchOpenAIModels(config: ProviderConfig): Promise<ModelInfo[]> {
@@ -142,6 +142,11 @@ export async function fetchLMStudioModels(config: ProviderConfig): Promise<Model
 
 // Main function to fetch models for any provider
 export async function fetchModelsForProvider(config: ProviderConfig, useCache = true): Promise<ModelInfo[]> {
+    // If not using cache (refresh requested), clear existing cache first
+    if (!useCache) {
+        clearCachedModels(config.provider);
+    }
+
     // Check cache first if requested
     if (useCache) {
         const cached = getCachedModels(config.provider);
@@ -173,7 +178,7 @@ export async function fetchModelsForProvider(config: ProviderConfig, useCache = 
     }
 
     // Cache the results only if we got models
-    if (models.length > 0 && useCache) {
+    if (models.length > 0) {
         saveCachedModels(config.provider, models);
     }
 
@@ -221,5 +226,5 @@ export async function refreshModelsCache(config: ProviderConfig): Promise<ModelI
 
 // Clear models cache for a specific provider
 export function clearModelsCache(provider: AIProvider): void {
-    saveCachedModels(provider, []);
+    clearCachedModels(provider);
 }

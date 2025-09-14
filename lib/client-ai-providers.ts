@@ -23,7 +23,7 @@ export async function* streamLMStudioClient(
 
         const response = await fetch(`${baseUrl}/v1/chat/completions`, {
             method: "POST",
-            headers: { 
+            headers: {
                 "Content-Type": "application/json",
                 // Add CORS headers for local requests
             },
@@ -49,6 +49,7 @@ export async function* streamLMStudioClient(
         let thinking = "";
         let isThinking = false;
         let thinkingStartTime: number | null = null;
+        let cumulativeThinkingTime = 0;
 
         try {
             while (true) {
@@ -69,13 +70,21 @@ export async function* streamLMStudioClient(
                         if (delta) {
                             // Check for thinking tags
                             if (delta.includes("<think>")) {
+                                if (isThinking && thinkingStartTime) {
+                                    // End previous thinking period
+                                    cumulativeThinkingTime += Math.floor((Date.now() - thinkingStartTime) / 1000);
+                                }
                                 isThinking = true;
                                 thinkingStartTime = Date.now();
                                 const parts = delta.split("<think>");
                                 content += parts[0];
                                 thinking += parts[1] || "";
                             } else if (delta.includes("</think>")) {
+                                if (isThinking && thinkingStartTime) {
+                                    cumulativeThinkingTime += Math.floor((Date.now() - thinkingStartTime) / 1000);
+                                }
                                 isThinking = false;
+                                thinkingStartTime = null;
                                 const parts = delta.split("</think>");
                                 thinking += parts[0] || "";
                                 content += parts[1] || "";
@@ -85,12 +94,16 @@ export async function* streamLMStudioClient(
                                 content += delta;
                             }
 
+                            const currentThinkingTime = isThinking && thinkingStartTime
+                                ? cumulativeThinkingTime + Math.floor((Date.now() - thinkingStartTime) / 1000)
+                                : cumulativeThinkingTime;
+
                             yield {
                                 content,
                                 thinking: thinking || undefined,
                                 isThinking,
                                 isComplete: false,
-                                thinkingTime: thinkingStartTime ? Math.floor((Date.now() - thinkingStartTime) / 1000) : undefined,
+                                thinkingTime: currentThinkingTime > 0 ? currentThinkingTime : undefined,
                             };
                         }
                     } catch (e) {
@@ -102,17 +115,22 @@ export async function* streamLMStudioClient(
             reader.releaseLock();
         }
 
+        // Final yield for LM Studio Client
+        if (isThinking && thinkingStartTime) {
+            cumulativeThinkingTime += Math.floor((Date.now() - thinkingStartTime) / 1000);
+        }
+
         yield {
             content,
             thinking: thinking || undefined,
             isThinking: false,
             isComplete: true,
-            thinkingTime: thinkingStartTime ? Math.floor((Date.now() - thinkingStartTime) / 1000) : undefined,
+            thinkingTime: cumulativeThinkingTime > 0 ? cumulativeThinkingTime : undefined,
         };
     } catch (error: any) {
         // Provide more helpful error messages for common connection issues
         let errorMessage = error.message || "Failed to get response from LM Studio";
-        
+
         if (error.name === 'TypeError' && error.message.includes('fetch')) {
             const url = config.baseUrl || "http://localhost:1234";
             errorMessage = `Cannot connect to LM Studio at ${url}. Please ensure:
@@ -121,7 +139,7 @@ export async function* streamLMStudioClient(
 3. The server is accessible at ${url}
 4. CORS is enabled in LM Studio settings`;
         }
-        
+
         yield {
             content: "",
             isThinking: false,
@@ -171,6 +189,7 @@ export async function* streamOllamaClient(
         let thinking = "";
         let isThinking = false;
         let thinkingStartTime: number | null = null;
+        let cumulativeThinkingTime = 0;
 
         try {
             while (true) {
@@ -188,13 +207,21 @@ export async function* streamOllamaClient(
 
                             // Check for thinking tags
                             if (text.includes("<think>")) {
+                                if (isThinking && thinkingStartTime) {
+                                    // End previous thinking period
+                                    cumulativeThinkingTime += Math.floor((Date.now() - thinkingStartTime) / 1000);
+                                }
                                 isThinking = true;
                                 thinkingStartTime = Date.now();
                                 const parts = text.split("<think>");
                                 content += parts[0];
                                 thinking += parts[1] || "";
                             } else if (text.includes("</think>")) {
+                                if (isThinking && thinkingStartTime) {
+                                    cumulativeThinkingTime += Math.floor((Date.now() - thinkingStartTime) / 1000);
+                                }
                                 isThinking = false;
+                                thinkingStartTime = null;
                                 const parts = text.split("</think>");
                                 thinking += parts[0] || "";
                                 content += parts[1] || "";
@@ -204,12 +231,16 @@ export async function* streamOllamaClient(
                                 content += text;
                             }
 
+                            const currentThinkingTime = isThinking && thinkingStartTime
+                                ? cumulativeThinkingTime + Math.floor((Date.now() - thinkingStartTime) / 1000)
+                                : cumulativeThinkingTime;
+
                             yield {
                                 content,
                                 thinking: thinking || undefined,
                                 isThinking,
                                 isComplete: data.done || false,
-                                thinkingTime: thinkingStartTime ? Math.floor((Date.now() - thinkingStartTime) / 1000) : undefined,
+                                thinkingTime: currentThinkingTime > 0 ? currentThinkingTime : undefined,
                             };
                         }
                     } catch (e) {
@@ -221,17 +252,22 @@ export async function* streamOllamaClient(
             reader.releaseLock();
         }
 
+        // Final yield for Ollama Client
+        if (isThinking && thinkingStartTime) {
+            cumulativeThinkingTime += Math.floor((Date.now() - thinkingStartTime) / 1000);
+        }
+
         yield {
             content,
             thinking: thinking || undefined,
             isThinking: false,
             isComplete: true,
-            thinkingTime: thinkingStartTime ? Math.floor((Date.now() - thinkingStartTime) / 1000) : undefined,
+            thinkingTime: cumulativeThinkingTime > 0 ? cumulativeThinkingTime : undefined,
         };
     } catch (error: any) {
         // Provide more helpful error messages for common connection issues
         let errorMessage = error.message || "Failed to get response from Ollama";
-        
+
         if (error.name === 'TypeError' && error.message.includes('fetch')) {
             const url = config.baseUrl || "http://localhost:11434";
             errorMessage = `Cannot connect to Ollama at ${url}. Please ensure:
@@ -239,7 +275,7 @@ export async function* streamOllamaClient(
 2. The model '${model}' is available (run: ollama pull ${model})
 3. The server is accessible at ${url}`;
         }
-        
+
         yield {
             content: "",
             isThinking: false,

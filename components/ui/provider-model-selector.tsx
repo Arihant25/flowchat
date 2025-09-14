@@ -5,7 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Button } from "@/components/ui/button";
 import { RefreshCw, Settings } from "lucide-react";
 import { ModelInfo, ProviderConfig } from "@/lib/types";
-import { getAllProviderConfigs } from "@/lib/storage";
+import { getAllProviderConfigs, cleanupExpiredCache } from "@/lib/storage";
 import { fetchModelsForProvider } from "@/lib/model-fetcher";
 import { shouldUseClientSideStreaming } from "@/lib/client-ai-providers";
 
@@ -149,7 +149,7 @@ export default memo(function ProviderModelSelector({
             }
 
             if (!mounted.current) return;
-            
+
             setModels(models);
 
             // Auto-select default model only if no model is currently selected
@@ -175,6 +175,8 @@ export default memo(function ProviderModelSelector({
         mounted.current = true;
         if (!hasInitialized) {
             setHasInitialized(true);
+            // Clean up expired cache on page load
+            cleanupExpiredCache();
             loadProviders();
         }
         return () => {
@@ -190,9 +192,10 @@ export default memo(function ProviderModelSelector({
     }, [selectedProviderId, hasLoadedProviders, providers.length]);
 
     // Memoize the refresh function to prevent unnecessary re-renders
-    const refreshModels = useCallback(() => {
+    const refreshModels = useCallback(async () => {
         if (selectedProviderId) {
-            loadModelsForProvider(selectedProviderId, true);
+            console.log(`Refreshing models for provider: ${selectedProviderId}`);
+            await loadModelsForProvider(selectedProviderId, true);
         }
     }, [selectedProviderId]);
 
@@ -259,7 +262,7 @@ export default memo(function ProviderModelSelector({
                 size="sm"
                 onClick={refreshModels}
                 disabled={loadingModels || !selectedProviderId}
-                title="Refresh models"
+                title={loadingModels ? "Refreshing models..." : "Refresh models"}
             >
                 <RefreshCw className={`w-4 h-4 ${loadingModels ? "animate-spin" : ""}`} />
             </Button>

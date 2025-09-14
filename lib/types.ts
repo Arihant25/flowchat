@@ -121,6 +121,15 @@ export const STORAGE_KEYS = {
     CACHED_MODELS: "flowchat_cached_models",
 } as const;
 
+export interface CachedModels {
+    models: ModelInfo[];
+    timestamp: number; // When the models were cached
+    version: number; // Cache version for future migrations
+}
+
+// Cache expiration time in milliseconds (7 days)
+export const CACHE_EXPIRATION_TIME = 7 * 24 * 60 * 60 * 1000;
+
 export interface UserPreferences {
     defaultProvider: string; // Provider config ID
     temperature: number;
