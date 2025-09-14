@@ -88,19 +88,7 @@ export default function ChatPage() {
       const newConversation: ChatConversation = {
         id: `conv-${Date.now()}`,
         title: "New Conversation",
-        nodes: initialNodePosition
-          ? [
-            {
-              id: `node-${Date.now()}`,
-              content: "",
-              isUser: true,
-              x: initialNodePosition.x,
-              y: initialNodePosition.y,
-              childIds: [],
-              isEditing: true,
-            },
-          ]
-          : [],
+        nodes: [], // Always start with empty nodes array
         lastModified: new Date(),
       };
       setCurrentConversation(newConversation);

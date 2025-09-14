@@ -31,6 +31,7 @@ export default function ChatCanvas({
     y: number;
   } | null>(null);
   const [deletingNodes, setDeletingNodes] = useState<Map<string, number>>(new Map());
+  const [pendingNodePosition, setPendingNodePosition] = useState<{ x: number; y: number } | null>(null);
   const isSelectingRef = useRef(false);
 
   // Node positioning constants
@@ -66,6 +67,29 @@ export default function ChatCanvas({
     conversationRef.current = conversation;
     onUpdateConversationRef.current = onUpdateConversation;
   }, [conversation, onUpdateConversation]);
+
+  // Handle pending node creation when conversation becomes available
+  useEffect(() => {
+    if (conversation && pendingNodePosition) {
+      const newNode: ChatNode = {
+        id: `node-${Date.now()}`,
+        content: "",
+        isUser: true,
+        x: pendingNodePosition.x,
+        y: pendingNodePosition.y,
+        childIds: [],
+        isEditing: true,
+      };
+
+      const updatedConversation: ChatConversation = {
+        ...conversation,
+        nodes: [...conversation.nodes, newNode],
+      };
+
+      onUpdateConversation(updatedConversation);
+      setPendingNodePosition(null);
+    }
+  }, [conversation, pendingNodePosition, onUpdateConversation]);
 
   // Calculate optimal position for a new child node
   const calculateChildPosition = useCallback((parentNode: ChatNode, existingNodes: ChatNode[], isLeafNode: boolean): { x: number; y: number } => {
@@ -125,6 +149,13 @@ export default function ChatCanvas({
         const x = (e.clientX - rect.left - pan.x) / zoom;
         const y = (e.clientY - rect.top - pan.y) / zoom;
 
+        if (!conversation) {
+          // Set pending node position and create new conversation
+          setPendingNodePosition({ x, y });
+          onCreateNewConversation();
+          return;
+        }
+
         const newNode: ChatNode = {
           id: `node-${Date.now()}`,
           content: "",
@@ -134,12 +165,6 @@ export default function ChatCanvas({
           childIds: [],
           isEditing: true,
         };
-
-        if (!conversation) {
-          // Call the parent's createNewConversation with initial node position
-          onCreateNewConversation({ x, y });
-          return;
-        }
 
         const updatedConversation: ChatConversation = {
           ...conversation,
