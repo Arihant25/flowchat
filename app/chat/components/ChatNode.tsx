@@ -91,7 +91,7 @@ export default function ChatNodeComponent({
   useEffect(() => {
     if (isMarkedForDeletion && !isDeleting) {
       // Start deletion animation with delay based on depth
-      const delay = deletionDepth * 150; // 150ms delay per level
+      const delay = deletionDepth * 80; // Match the stagger delay from ChatCanvas
 
       setTimeout(() => {
         setIsDeleting(true);
@@ -395,7 +395,7 @@ export default function ChatNodeComponent({
       // After animation completes, actually delete the node
       setTimeout(() => {
         propsRef.current.onDeleteNode(node.id);
-      }, 300); // Match animation duration
+      }, 400); // Match animation duration
     } else {
       setShowDeleteConfirm(true);
     }
@@ -411,7 +411,7 @@ export default function ChatNodeComponent({
     // After animation completes, actually delete the node
     setTimeout(() => {
       propsRef.current.onDeleteNode(node.id);
-    }, 300); // Match animation duration
+    }, 400); // Match animation duration
   };
 
   const handleAddChild = () => {
@@ -422,12 +422,16 @@ export default function ChatNodeComponent({
   const handleTextSelect = (e: React.MouseEvent) => {
     if (node.isUser) return; // only AI nodes
     e.stopPropagation();
-    const selection = window.getSelection();
-    if (selection && selection.toString().trim() && selection.rangeCount > 0) {
-      const range = selection.getRangeAt(0);
-      const rect = range.getBoundingClientRect();
-      propsRef.current.onTextSelection(node.id, selection.toString(), rect.left, rect.top);
-    }
+
+    // Use a small delay to ensure the browser has finalized the selection
+    setTimeout(() => {
+      const selection = window.getSelection();
+      if (selection && selection.toString().trim() && selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0);
+        const rect = range.getBoundingClientRect();
+        propsRef.current.onTextSelection(node.id, selection.toString(), rect.left, rect.top);
+      }
+    }, 50);
   };
 
   // D3-style drag handling with improved momentum
@@ -501,12 +505,12 @@ export default function ChatNodeComponent({
       >
         <Card
           ref={cardRef}
-          className={`chat-node-card min-w-[32rem] max-w-[48rem] transition-all duration-200 border-2 ${nodeBorderColor} ${isHovered ? "shadow-lg" : "shadow-md"} ${isDragging ? "shadow-2xl ring-2 ring-blue-400 ring-opacity-50 scale-95" : ""} ${isDeleting ? "animate-pulse scale-110 opacity-30" : ""} cursor-grab active:cursor-grabbing`}
+          className={`chat-node-card min-w-[32rem] max-w-[48rem] transition-all duration-200 border-2 ${nodeBorderColor} ${isHovered ? "shadow-lg" : "shadow-md"} ${isDragging ? "shadow-2xl ring-2 ring-blue-400 ring-opacity-50 scale-95" : ""} cursor-grab active:cursor-grabbing`}
           onMouseEnter={() => setIsHovered(true)}
           onMouseLeave={() => setIsHovered(false)}
           onMouseDown={handleMouseDown}
           style={{
-            animation: isDeleting ? "pop-out 0.3s ease-in-out" : undefined,
+            animation: isDeleting ? "pop-out 0.3s ease-in-out forwards" : undefined,
           }}
         >
           <CardContent className="p-4 relative">

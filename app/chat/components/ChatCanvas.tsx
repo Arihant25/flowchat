@@ -3,7 +3,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { ChatConversation, ChatNode } from "../page";
 import ChatNodeComponent from "./ChatNode";
-import { getLastUsedProviderAndModel, getUserPreferences } from "@/lib/storage";
 
 interface ChatCanvasProps {
   conversation: ChatConversation | null;
@@ -247,8 +246,10 @@ export default function ChatCanvas({
 
   const updateNode = useCallback(
     (nodeId: string, updates: Partial<ChatNode>) => {
-      // Avoid state churn that might clear highlight while user is dragging selection
-      if (isSelectingRef.current) return;
+      // Avoid state churn that might clear highlight while user is actively selecting text
+      // But allow content updates for streaming responses
+      if (isSelectingRef.current && !updates.content) return;
+
       const currentConversation = conversationRef.current;
       if (!currentConversation) return;
 
@@ -290,72 +291,77 @@ export default function ChatCanvas({
 
       collectChildNodes(nodeId);
 
-      // Group nodes by depth for cascading animation
-      const nodesByDepth = new Map<number, string[]>();
-      nodeDepths.forEach((depth, nodeId) => {
-        if (!nodesByDepth.has(depth)) {
-          nodesByDepth.set(depth, []);
-        }
-        nodesByDepth.get(depth)!.push(nodeId);
-      });
-
-      // Start cascading deletion animation
-      const deletionMap = new Map<string, number>();
-      nodeDepths.forEach((depth, nodeId) => {
-        deletionMap.set(nodeId, depth);
-      });
-      setDeletingNodes(deletionMap);
-
-      // Schedule animations with delays based on depth
+      // Schedule cascading deletion with staggered timing
       const maxDepth = Math.max(...nodeDepths.values());
+      const animationDuration = 400; // Slightly longer for the enhanced animation
+      const staggerDelay = 80; // Faster cascade for more dynamic feel
+
+      // Start the cascading animation
       for (let depth = 0; depth <= maxDepth; depth++) {
-        const nodesAtDepth = nodesByDepth.get(depth) || [];
-        // Delay increases with depth for chain reaction effect
-        const delay = depth * 150; // 150ms delay between levels
+        const delay = depth * staggerDelay;
 
         setTimeout(() => {
-          // Don't need to do anything here as nodes are already marked as deleting
-          // The actual deletion happens after all animations complete
+          // Mark nodes at this depth for deletion
+          const deletionMap = new Map<string, number>();
+          nodeDepths.forEach((nodeDepth, nodeId) => {
+            if (nodeDepth === depth) {
+              deletionMap.set(nodeId, nodeDepth);
+            }
+          });
+          setDeletingNodes(prev => new Map([...prev, ...deletionMap]));
+
+          // After animation completes for this level, remove the nodes
+          setTimeout(() => {
+            const currentConv = conversationRef.current;
+            if (!currentConv) return;
+
+            // Only remove nodes at this specific depth
+            const nodesToRemoveAtThisDepth = Array.from(nodeDepths.entries())
+              .filter(([_, nodeDepth]) => nodeDepth === depth)
+              .map(([nodeId]) => nodeId);
+
+            const updatedNodes = currentConv.nodes
+              .filter((node: ChatNode) => !nodesToRemoveAtThisDepth.includes(node.id))
+              .map((node: ChatNode) => ({
+                ...node,
+                childIds: node.childIds.filter(
+                  (childId: string) => !nodesToRemoveAtThisDepth.includes(childId),
+                ),
+              }));
+
+            // Update parent connections if needed
+            if (depth === 0 && nodeToDelete.parentId) {
+              const parentIndex = updatedNodes.findIndex(
+                (n: ChatNode) => n.id === nodeToDelete.parentId,
+              );
+              if (parentIndex !== -1) {
+                updatedNodes[parentIndex] = {
+                  ...updatedNodes[parentIndex],
+                  childIds: updatedNodes[parentIndex].childIds.filter(
+                    (id: string) => id !== nodeId,
+                  ),
+                };
+              }
+            }
+
+            const newConversation = {
+              ...currentConv,
+              nodes: updatedNodes,
+            };
+            conversationRef.current = newConversation;
+
+            // Clear deletion markers for removed nodes
+            setDeletingNodes(prev => {
+              const newMap = new Map(prev);
+              nodesToRemoveAtThisDepth.forEach(id => newMap.delete(id));
+              return newMap;
+            });
+
+            onUpdateConversationRef.current(newConversation);
+          }, animationDuration);
+
         }, delay);
       }
-
-      // After all animations complete, actually delete the nodes
-      const totalAnimationTime = maxDepth * 150 + 300; // depth delays + animation duration
-      setTimeout(() => {
-        const updatedNodes = currentConversation.nodes
-          .filter((node: ChatNode) => !nodesToDelete.has(node.id))
-          .map((node: ChatNode) => ({
-            ...node,
-            childIds: node.childIds.filter(
-              (childId: string) => !nodesToDelete.has(childId),
-            ),
-          }));
-
-        if (nodeToDelete.parentId) {
-          const parentIndex = updatedNodes.findIndex(
-            (n: ChatNode) => n.id === nodeToDelete.parentId,
-          );
-          if (parentIndex !== -1) {
-            updatedNodes[parentIndex] = {
-              ...updatedNodes[parentIndex],
-              childIds: updatedNodes[parentIndex].childIds.filter(
-                (id: string) => id !== nodeId,
-              ),
-            };
-          }
-        }
-
-        const newConversation = {
-          ...currentConversation,
-          nodes: updatedNodes,
-        };
-        conversationRef.current = newConversation;
-
-        // Clear deleting nodes state
-        setDeletingNodes(new Map());
-
-        onUpdateConversationRef.current(newConversation);
-      }, totalAnimationTime);
     },
     [], // No dependencies - uses refs
   );
@@ -494,6 +500,8 @@ export default function ChatCanvas({
   const handleTextSelection = useCallback(
     (nodeId: string, text: string, x: number, y: number) => {
       if (text.trim()) {
+        // Ensure we're not in a selecting state when setting the selected text
+        isSelectingRef.current = false;
         setSelectedText({ text, nodeId, x, y });
       }
     },
@@ -563,10 +571,10 @@ export default function ChatCanvas({
       }
     };
     const handleMouseUp = () => {
-      // Give browser a tick to finalize selection highlight
+      // Give browser time to finalize selection highlight and handle onTextSelection
       setTimeout(() => {
         isSelectingRef.current = false;
-      }, 20);
+      }, 100);
     };
     const handleClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
@@ -805,7 +813,7 @@ export default function ChatCanvas({
           <button
             data-reply-button="true"
             onClick={handleReplyToSelection}
-            className="bg-primary text-primary-foreground px-3 py-1 rounded text-sm hover:bg-primary/90 shadow"
+            className="bg-primary text-primary-foreground px-2 py-1 rounded text-sm hover:bg-primary/90 shadow"
           >
             Reply
           </button>
