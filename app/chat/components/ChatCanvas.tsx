@@ -650,21 +650,105 @@ export default function ChatCanvas({
                 const nodeWidth = NODE_WIDTH;
                 const nodeHeight = NODE_HEIGHT;
 
+                // Calculate centers of both nodes
                 const parentCenterX = node.x + nodeWidth / 2;
-                const parentBottomY = node.y + nodeHeight + 10;
+                const parentCenterY = node.y + nodeHeight / 2;
                 const childCenterX = childNode.x + nodeWidth / 2;
-                const childTopY = childNode.y - 10;
+                const childCenterY = childNode.y + nodeHeight / 2;
 
-                const minX = Math.min(parentCenterX, childCenterX) - 60;
-                const minY = Math.min(parentBottomY, childTopY) - 20;
-                const maxX = Math.max(parentCenterX, childCenterX) + 60;
-                const maxY = Math.max(parentBottomY, childTopY) + 20;
+                // Calculate the angle between nodes
+                const dx = childCenterX - parentCenterX;
+                const dy = childCenterY - parentCenterY;
+                const angle = Math.atan2(dy, dx);
 
-                const midY = (parentBottomY + childTopY) / 2;
-                const pathData = `M ${parentCenterX - minX} ${parentBottomY - minY} 
-                                   C ${parentCenterX - minX} ${midY - minY} 
-                                     ${childCenterX - minX} ${midY - minY} 
-                                     ${childCenterX - minX} ${childTopY - minY}`;
+                // Calculate connection points on the edges of the nodes
+                // We need to find where the line from center to center intersects the node rectangles
+
+                // For parent: find exit point on the rectangle edge
+                let parentExitX, parentExitY;
+                const parentLeft = node.x;
+                const parentRight = node.x + nodeWidth;
+                const parentTop = node.y;
+                const parentBottom = node.y + nodeHeight;
+
+                // Determine which edge the line exits from
+                const parentSlope = dy / dx;
+                if (Math.abs(dx) > Math.abs(dy)) {
+                  // Exit from left or right edge
+                  if (dx > 0) {
+                    // Exit from right edge
+                    parentExitX = parentRight;
+                    parentExitY = parentCenterY + (parentRight - parentCenterX) * parentSlope;
+                  } else {
+                    // Exit from left edge
+                    parentExitX = parentLeft;
+                    parentExitY = parentCenterY + (parentLeft - parentCenterX) * parentSlope;
+                  }
+                } else {
+                  // Exit from top or bottom edge
+                  if (dy > 0) {
+                    // Exit from bottom edge
+                    parentExitY = parentBottom;
+                    parentExitX = parentCenterX + (parentBottom - parentCenterY) / parentSlope;
+                  } else {
+                    // Exit from top edge
+                    parentExitY = parentTop;
+                    parentExitX = parentCenterX + (parentTop - parentCenterY) / parentSlope;
+                  }
+                }
+
+                // For child: find entry point on the rectangle edge
+                let childEntryX, childEntryY;
+                const childLeft = childNode.x;
+                const childRight = childNode.x + nodeWidth;
+                const childTop = childNode.y;
+                const childBottom = childNode.y + nodeHeight;
+
+                // Determine which edge the line enters from (opposite direction)
+                if (Math.abs(dx) > Math.abs(dy)) {
+                  // Enter from left or right edge
+                  if (dx > 0) {
+                    // Enter from left edge
+                    childEntryX = childLeft;
+                    childEntryY = childCenterY + (childLeft - childCenterX) * parentSlope;
+                  } else {
+                    // Enter from right edge
+                    childEntryX = childRight;
+                    childEntryY = childCenterY + (childRight - childCenterX) * parentSlope;
+                  }
+                } else {
+                  // Enter from top or bottom edge
+                  if (dy > 0) {
+                    // Enter from top edge
+                    childEntryY = childTop;
+                    childEntryX = childCenterX + (childTop - childCenterY) / parentSlope;
+                  } else {
+                    // Enter from bottom edge
+                    childEntryY = childBottom;
+                    childEntryX = childCenterX + (childBottom - childCenterY) / parentSlope;
+                  }
+                }
+
+                // Calculate control points for a smooth curve
+                const controlOffset = 50; // Distance for control points
+                const controlX1 = parentExitX + Math.cos(angle) * controlOffset;
+                const controlY1 = parentExitY + Math.sin(angle) * controlOffset;
+                const controlX2 = childEntryX - Math.cos(angle) * controlOffset;
+                const controlY2 = childEntryY - Math.sin(angle) * controlOffset;
+
+                // Calculate bounding box for the SVG
+                const allX = [parentExitX, childEntryX, controlX1, controlX2];
+                const allY = [parentExitY, childEntryY, controlY1, controlY2];
+                const minX = Math.min(...allX) - 10;
+                const minY = Math.min(...allY) - 10;
+                const maxX = Math.max(...allX) + 10;
+                const maxY = Math.max(...allY) + 10;
+
+                // Create path data with proper curve
+                const pathData = `M ${parentExitX - minX} ${parentExitY - minY} 
+                                   C ${controlX1 - minX} ${controlY1 - minY} 
+                                     ${controlX2 - minX} ${controlY2 - minY} 
+                                     ${childEntryX - minX} ${childEntryY - minY}`;
 
                 return (
                   <svg
